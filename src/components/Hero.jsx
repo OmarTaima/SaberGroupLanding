@@ -90,7 +90,7 @@ const Hero = () => {
             {/* Main Heading */}
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-tight">
               <span className="block text-light-900 dark:text-white">
-                {t("hero:title1") || "We craft"}
+                {t("hero:title1") || "We Craft"}
               </span>
               <span className="bg-gradient-to-r from-primary-500 via-secondary-500 to-primary-500 bg-clip-text text-transparent bg-[length:200%_auto] animate-gradient">
                 {t("hero:title2") || "strategic marketing"}
@@ -231,7 +231,7 @@ const Hero = () => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes fade-in {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "../i18n/hooks/useTranslation";
-import axios from "axios";
 import Swal from "sweetalert2";
-import { addLead } from "../api";
+import { SITE_NAME } from "../utils/ogMeta";
+import { addLead, fetchCountries as apiFetchCountries, fetchCities as apiFetchCities, fetchGovernorates as apiFetchGovernorates } from "../api";
 
 const ContactUs = () => {
   const { t, isArabic } = useTranslation();
@@ -29,6 +29,16 @@ const ContactUs = () => {
   const inputClass = "w-full px-6 py-4 rounded-2xl bg-white/80 dark:bg-dark-800/80 border border-light-200/50 dark:border-dark-700/50 text-light-900 dark:text-white placeholder-light-400/50 dark:placeholder-light-500/50 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-shadow shadow-sm";
   
   const labelClass = "block text-sm font-medium text-light-700 dark:text-light-300 mb-2";
+
+  // Helper to get a localized display name from location objects
+  const formatLocationName = (item) => {
+    if (!item) return '';
+    const name = item.name || '';
+    if (!name) return '';
+    if (typeof name === 'string') return name;
+    // name may be an object like { en, ar }
+    return isArabic ? (name.ar || name.en || '') : (name.en || name.ar || '');
+  };
 
   const services = [
     { value: "all", label: t("contact:serviceAll") || "All Services" },
@@ -104,16 +114,6 @@ const ContactUs = () => {
       link: "https://www.linkedin.com/in/ahmed-saber-004aa8196/",
       color: "hover:bg-blue-700",
     },
-    // {
-    //   name: "Twitter",
-    //   icon: (
-    //     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-    //       <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.937 4.937 0 004.604 3.417 9.868 9.868 0 01-6.102 2.104c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 0021.745-3.332A13.94 13.94 0 0024 5.565a9.9 9.9 0 01-2.047.005z"/>
-    //     </svg>
-    //   ),
-    //   link: "#",
-    //   color: "hover:bg-blue-400",
-    // },
     {
       name: "Facebook",
       icon: (
@@ -124,16 +124,16 @@ const ContactUs = () => {
       link: "https://www.facebook.com/sabergroupeg",
       color: "hover:bg-blue-600",
     },
-    // {
-    //   name: "TikTok",
-    //   icon: (
-    //     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-    //       <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>
-    //     </svg>
-    //   ),
-    //   link: "#",
-    //   color: "hover:bg-black",
-    // },
+    {
+      name: "TikTok",
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>
+        </svg>
+      ),
+      link: "#",
+      color: "hover:bg-black",
+    },
   ];
 
   const handleChange = (e) => {
@@ -145,13 +145,13 @@ const ContactUs = () => {
   useEffect(() => {
     const fetchCountries = async () => {
       try {
-        const res = await axios.get(`${import.meta.env.VITE_LOCATION_API_URL}/country/public`, {
-          params: { deleted: false, PageCount: 1000, page: 1 },
-        });
-        const countriesData = res.data.data || [];
+        const res = await apiFetchCountries({ deleted: false, PageCount: 1000, page: 1 });
+        const countriesData = res.data?.data || [];
         setCountries(countriesData);
-
-        const egypt = countriesData.find((c) => c.name?.toLowerCase() === "egypt" || c.name?.toLowerCase() === "مصر");
+        const egypt = countriesData.find((c) => {
+          const nm = formatLocationName(c).toString().trim().toLowerCase();
+          return nm === "egypt" || nm === "مصر";
+        });
         if (egypt) {
           setFormData((prev) => ({ ...prev, country: egypt._id }));
           fetchGovernorates(egypt._id);
@@ -163,10 +163,8 @@ const ContactUs = () => {
 
     const fetchAllCities = async () => {
       try {
-        const res = await axios.get(`${import.meta.env.VITE_LOCATION_API_URL}/city/public`, {
-          params: { deleted: false, PageCount: 1000, page: 1 },
-        });
-        setAllCities(res.data.data || []);
+        const res = await apiFetchCities({ deleted: false, PageCount: 1000, page: 1 });
+        setAllCities(res.data?.data || []);
       } catch (err) {
         console.error("Failed to fetch cities:", err);
       }
@@ -185,10 +183,8 @@ const ContactUs = () => {
     }
 
     try {
-      const res = await axios.get(`${import.meta.env.VITE_LOCATION_API_URL}/government/public`, {
-        params: { deleted: false, PageCount: 1000, page: 1, country: countryId },
-      });
-      setGovernorates(res.data.data || []);
+      const res = await apiFetchGovernorates({ deleted: false, PageCount: 1000, page: 1, country: countryId });
+      setGovernorates(res.data?.data || []);
       setFormData((prev) => ({ ...prev, government: "", city: "" }));
     } catch (err) {
       console.error("Failed to fetch governorates:", err);
@@ -196,10 +192,9 @@ const ContactUs = () => {
     }
   };
 
-  // projects removed — not used anymore
 
   const filteredCountries = countries.filter((c) => {
-    const name = (c.name || "").toString().trim().toLowerCase();
+    const name = (formatLocationName(c) || "").toString().trim().toLowerCase();
     return name !== "اونلاين" && name !== "غير محدد";
   });
 
@@ -207,7 +202,7 @@ const ContactUs = () => {
     if (!formData.country) return false;
     const sel = countries.find((c) => c._id === formData.country);
     if (!sel) return false;
-    const name = (sel.name || "").toString().trim().toLowerCase();
+    const name = (formatLocationName(sel) || "").toString().trim().toLowerCase();
     return name === "egypt" || name === "مصر";
   })();
 
@@ -219,7 +214,7 @@ const ContactUs = () => {
 
     if (name === "country") {
       const selected = countries.find((c) => c._id === value);
-      const selName = (selected?.name || "").toString().trim().toLowerCase();
+      const selName = formatLocationName(selected).toString().trim().toLowerCase();
       if (selName === "egypt" || selName === "مصر") {
         fetchGovernorates(value);
       } else {
@@ -297,10 +292,13 @@ const ContactUs = () => {
 
       await addLead(payload);
 
-      await Swal.fire({ icon: 'success', title: t('contact:successTitle') || 'Message Sent Successfully!', text: t('contact:successMessage') || "Thank you for contacting VALORA. We'll get back to you within 24 hours.", confirmButtonText: t('common:ok') || 'OK', confirmButtonColor: '#10b981' });
+      await Swal.fire({ icon: 'success', title: t('contact:successTitle') || 'Message Sent Successfully!', text: t('contact:successMessage') || `Thank you for contacting ${SITE_NAME}. We'll get back to you within 24 hours.`, confirmButtonText: t('common:ok') || 'OK', confirmButtonColor: '#10b981' });
 
       setSubmitSuccess(true);
-      const egypt = countries.find((c) => c.name?.toLowerCase() === "egypt" || c.name?.toLowerCase() === "مصر");
+      const egypt = countries.find((c) => {
+        const nm = formatLocationName(c).toString().trim().toLowerCase();
+        return nm === "egypt" || nm === "مصر";
+      });
       setFormData({ name: "", email: "", phone: "", message: "", country: egypt?._id || "", government: "", city: "" });
       if (egypt) fetchGovernorates(egypt._id);
       setErrors({});
@@ -494,7 +492,7 @@ const ContactUs = () => {
                       <label htmlFor="country" className={labelClass}>{t("contact:country") || "Country"} *</label>
                       <select id="country" name="country" value={formData.country} onChange={enhancedHandleChange} className={`${inputClass} ${errors.country ? "border-danger-500 focus:border-danger-500 focus:ring-danger-500" : ""}`}>
                         <option value="">{t("contact:selectCountry") || "Select a country"}</option>
-                        {filteredCountries.map((c) => (<option key={c._id} value={c._id}>{c.name}</option>))}
+                        {filteredCountries.map((c) => (<option key={c._id} value={c._id}>{formatLocationName(c)}</option>))}
                       </select>
                       {errors.country && <p className="mt-2 text-sm text-danger-500">{errors.country}</p>}
                     </div>
@@ -503,7 +501,7 @@ const ContactUs = () => {
                         <label htmlFor="government" className={labelClass}>{t("contact:government") || "Governorate"}</label>
                         <select id="government" name="government" value={formData.government} onChange={enhancedHandleChange} disabled={!formData.country} className={`${inputClass} disabled:opacity-50 disabled:cursor-not-allowed`}>
                           <option value="">{t("contact:selectGovernment") || "Select a governorate"}</option>
-                          {governorates.map((g) => (<option key={g._id} value={g._id}>{g.name}</option>))}
+                          {governorates.map((g) => (<option key={g._id} value={g._id}>{formatLocationName(g)}</option>))}
                         </select>
                       </div>
                     ) : null}
@@ -515,7 +513,7 @@ const ContactUs = () => {
                         <label htmlFor="city" className={labelClass}>{t("contact:city") || "City"}</label>
                         <select id="city" name="city" value={formData.city} onChange={enhancedHandleChange} disabled={!formData.government} className={`${inputClass} disabled:opacity-50 disabled:cursor-not-allowed`}>
                           <option value="">{t("contact:selectCity") || "Select a city"}</option>
-                          {cities.map((c) => (<option key={c._id} value={c._id}>{c.name}</option>))}
+                          {cities.map((c) => (<option key={c._id} value={c._id}>{formatLocationName(c)}</option>))}
                         </select>
                       </div>
                     </div>
@@ -710,7 +708,7 @@ const ContactUs = () => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes fade-in {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }

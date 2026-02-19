@@ -12,8 +12,8 @@ module.exports = {
         lightDark: '#2C3E50',
       },
       fontFamily: {
-        sans: ['Poppins', 'system-ui', '-apple-system', 'sans-serif'],
-        arabic: ['"Noto Sans Arabic"', 'sans-serif'],
+        sans: ['Cairo', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        arabic: ['Cairo', '"Noto Sans Arabic"', 'sans-serif'],
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-in-out',

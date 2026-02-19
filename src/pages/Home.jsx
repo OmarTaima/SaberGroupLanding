@@ -24,8 +24,8 @@ const Home = () => {
         {ogImage && <meta property="og:image" content={ogImage} />}
       </Helmet>
 
-      <Hero />
-      <About />
+      {/* <Hero />
+      <About /> */}
       <ContactUs />
       <Footer />
     </main>

@@ -8,12 +8,14 @@ import contactEN from "./locales/en/contact.json";
 import heroEN from "./locales/en/hero.json";
 import footerEN from "./locales/en/footer.json";
 import aboutEN from "./locales/en/about.json";
+import joinUsEN from "./locales/en/joinUs.json";
 import commonAR from "./locales/ar/common.json";
 import navigationAR from "./locales/ar/navigation.json";
 import contactAR from "./locales/ar/contact.json";
 import heroAR from "./locales/ar/hero.json";
 import footerAR from "./locales/ar/footer.json";
 import aboutAR from "./locales/ar/about.json";
+import joinUsAR from "./locales/ar/joinUs.json";
 
 // Translation resources
 const resources = {
@@ -24,6 +26,7 @@ const resources = {
     hero: heroEN,
     footer: footerEN,
     about: aboutEN,
+    joinUs: joinUsEN,
   },
   ar: {
     common: commonAR,
@@ -32,6 +35,7 @@ const resources = {
     hero: heroAR,
     footer: footerAR,
     about: aboutAR,
+    joinUs: joinUsAR,
   },
 };
 
@@ -45,7 +49,7 @@ i18n
     lng: "ar",
     supportedLngs: ["en", "ar"],
     defaultNS: "contact",
-    ns: ["common", "navigation", "contact", "footer", "hero", "about"],
+    ns: ["common", "navigation", "contact", "footer", "hero", "about", "joinUs"],
 
     // Detection options
     detection: {

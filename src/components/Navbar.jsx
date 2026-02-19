@@ -1,17 +1,19 @@
 // components/Navbar.jsx
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "../i18n/hooks/useTranslation";
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import logo from "/auth-logo.png";
 const Navbar = () => {
   const { t, isArabic, toggleLanguage } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [activeLink, setActiveLink] = useState("home");
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const navLinks = [
-    { id: "home", label: t("navigation:home") || "Home", href: "#" },
-    { id: "about", label: t("navigation:about") || "About Us", href: "#about" },
-    { id: "contact", label: t("navigation:contact") || "Contact", href: "#contact-section" },
+    { id: "home", label: t("navigation:home") || "Home", href: "/" },
+    { id: "join", label: t("joinUs:title") || "Join Us", href: "/join-us" },
   ];
 
   useEffect(() => {
@@ -23,14 +25,28 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Track route changes and update active link accordingly
+  useEffect(() => {
+    const path = location.pathname || '/';
+    if (path.startsWith('/join-us')) setActiveLink('join');
+    else setActiveLink('home');
+  }, [location.pathname]);
+
   const scrollToSection = (href) => {
     setIsOpen(false);
+    // If internal route (starts with /) navigate client-side
+    if (href && href.startsWith('/')) {
+      navigate(href);
+      setActiveLink('join');
+      return;
+    }
+
     if (href === "#") {
       window.scrollTo({ top: 0, behavior: "smooth" });
       setActiveLink("home");
       return;
     }
-    
+
     const element = document.querySelector(href);
     if (element) {
       element.scrollIntoView({ behavior: "smooth" });
@@ -49,12 +65,9 @@ const Navbar = () => {
       <div className="container mx-auto px-4 md:px-6">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              scrollToSection("#");
-            }}
+          <Link
+            to="/"
+            onClick={() => { setActiveLink('home'); }}
             className="relative group"
           >
             <div className="absolute -inset-2 bg-gradient-to-r from-primary-500 to-secondary-500 rounded-lg opacity-0 group-hover:opacity-20 blur transition-opacity duration-300" />
@@ -63,7 +76,7 @@ const Navbar = () => {
                 <img src={logo} alt="Saber Group" className="w-full h-full object-contain" />
               </div>
             </div>
-          </a>
+          </Link>
 
           {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center gap-1">
@@ -212,6 +225,11 @@ const Navbar = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                       </svg>
                     )}
+                    {link.id === "join" && (
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4V2m0 20v-2m8-8h2M2 12H4m15.364-6.364l1.414-1.414M4.222 19.778l1.414-1.414M19.778 19.778l-1.414-1.414M6.343 6.343L4.93 4.93" />
+                      </svg>
+                    )}
                     {link.id === "blog" && (
                       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
@@ -272,7 +290,7 @@ const Navbar = () => {
         />
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes fade-in {
           from { opacity: 0; }
           to { opacity: 1; }
