@@ -65,8 +65,8 @@ const ContactUs = () => {
         </svg>
       ),
       title: t("contact:callUs") || "Call Us",
-      value: "010 80099759",
-      link: "tel:+201080099759",
+      value: "01080099757",
+      link: "tel:+201080099757",
       bg: "from-blue-500 to-cyan-500",
     },
     {
@@ -87,8 +87,8 @@ const ContactUs = () => {
         </svg>
       ),
       title: t("contact:whatsapp") || "WhatsApp",
-      value: "20 10 00233277",
-      link: "https://wa.me/201000233277",
+      value: "01080099757",
+      link: "https://wa.me/201080099757",
       bg: "from-green-500 to-emerald-500",
     },
   ];
@@ -647,7 +647,7 @@ const ContactUs = () => {
                     </div>
                     <div>
                       <p className="text-sm text-light-500 dark:text-light-400">Address</p>
-                      <p className="font-semibold text-light-900 dark:text-white">Egypt - Tanta - El-Stad St</p>
+                      <p className="font-semibold text-light-900 dark:text-white"> {t("contact:address") || "El-Stad St - Tanta - Egypt"}</p>
                     </div>
                   </div>
                   
@@ -659,7 +659,7 @@ const ContactUs = () => {
                     </div>
                     <div>
                       <p className="text-sm text-light-500 dark:text-light-400">Hours</p>
-                      <p className="font-semibold text-light-900 dark:text-white">Sat - Thu, 9:00 AM - 6:00 PM</p>
+                      <p className="font-semibold text-light-900 dark:text-white">{t("contact:officeHours") || "Sat - Thu, 9:00 AM - 5:00 PM"}</p>
                     </div>
                   </div>
                   
