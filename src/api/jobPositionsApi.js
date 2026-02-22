@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const FORM_API_URL = import.meta.env.VITE_FORM_URL || 'https://application-maker.onrender.com/api';
 // Use company identifier from env; API may accept either a slug or an id
-const COMPANY_ID = import.meta.env.VITE_FORM_COMPANY_ID || 'SABER-GROUP';
+const COMPANY_ID = import.meta.env.VITE_FORM_COMPANY_ID || 'saber-group';
 
 /**
  * Fetch job positions from the job form API
