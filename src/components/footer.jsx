@@ -78,8 +78,7 @@ const Footer = () => {
               </div>
 
               <p className="text-light-300 text-sm leading-relaxed">
-                {t("footer:description") ||
-                  "Premium real estate developments that combine enduring value with timeless aura."}
+                {t("footer:description")}
               </p>
 
               {/* Business Hours */}

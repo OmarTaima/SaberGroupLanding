@@ -10,7 +10,7 @@ const COMPANY_ID = import.meta.env.VITE_FORM_COMPANY_ID || 'saber-group';
  */
 export const fetchJobPositions = async () => {
   try {
-    const response = await axios.get(`${FORM_API_URL}/public/jobs/company/${COMPANY_ID}`);
+    const response = await axios.get(`${FORM_API_URL}/public/jobs/company/saber-group`);
     return response.data;
   } catch (error) {
     console.error('Error fetching job positions:', error);

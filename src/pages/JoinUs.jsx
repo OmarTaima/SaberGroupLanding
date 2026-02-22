@@ -71,7 +71,7 @@ const JoinUs = () => {
           href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap"
         />
         <title>{t('joinUs:title') || `Join Us - ${SITE_NAME}`}</title>
-        <meta name="description" content={t('joinUs:subtitle') || `Explore career opportunities at ${SITE_NAME}. Join our team and help shape the future of real estate in Egypt.`} />
+        <meta name="description" content={t('joinUs:subtitle') || `Explore career opportunities at ${SITE_NAME}. Join our team and help shape the future of the markting in Egypt.`} />
         
         {/* Open Graph / Facebook / WhatsApp */}
         <meta property="og:type" content="website" />
@@ -119,7 +119,7 @@ const JoinUs = () => {
 
           <p className="text-xl text-light-600 dark:text-light-300 leading-relaxed max-w-3xl mx-auto">
             {t('joinUs:subtitle') ||
-              'Explore exciting career opportunities and become part of our growing team. We are looking for talented individuals to help shape the future of real estate.'}
+              'Explore exciting career opportunities and become part of our growing team. We are looking for talented individuals to help shape the future of marketing in Egypt.'}
           </p>
         </div>
 

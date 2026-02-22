@@ -4,7 +4,7 @@ import { useTranslation } from "../i18n/hooks/useTranslation";
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import logo from "/auth-logo.png";
 const Navbar = () => {
-  const { t, isArabic, toggleLanguage } = useTranslation();
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [activeLink, setActiveLink] = useState("home");
@@ -125,16 +125,7 @@ const Navbar = () => {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-4">
-            {/* Language Toggle */}
-            <button
-              className="relative w-10 h-10 rounded-xl bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-light-200/50 dark:border-dark-700/50 flex items-center justify-center hover:border-primary-500/50 transition-all duration-300 group"
-              aria-label="Toggle language"
-              onClick={() => toggleLanguage()}
-            >
-              <span className="text-sm font-semibold text-light-700 dark:text-light-300 group-hover:text-primary-500 transition-colors">
-                {isArabic ? "EN" : "عربي"}
-              </span>
-            </button>
+            {/* Language selector removed - default is English */}
 
             {/* CTA Button - Desktop */}
             {/* <a
@@ -270,13 +261,7 @@ const Navbar = () => {
                 </svg>
               </a> */}
               
-              {/* Language Toggle - Mobile */}
-              <button onClick={() => { toggleLanguage(); setIsOpen(false); }} className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-light-200/50 dark:border-dark-700/50 text-light-700 dark:text-light-300 rounded-xl font-medium hover:border-primary-500/50 transition-all duration-300">
-                <span>{isArabic ? "English" : "العربية"}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-                </svg>
-              </button>
+              {/* Mobile language selector removed - default is English */}
             </div>
           </div>
         </div>

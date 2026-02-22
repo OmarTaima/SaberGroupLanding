@@ -14,13 +14,13 @@ const Home = () => {
     <main>
       <Helmet>
         <title>Saber Group — Home</title>
-        <meta name="description" content="Saber Group — Premium real estate developments and creative marketing." />
+        <meta name="description" content="Saber Group — Premium creative marketing." />
 
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content={SITE_NAME} />
         <meta property="og:url" content={pageUrl} />
         <meta property="og:title" content="Saber Group — Home" />
-        <meta property="og:description" content="Saber Group — Premium real estate developments and creative marketing." />
+        <meta property="og:description" content="Saber Group — Premium creative marketing." />
         {ogImage && <meta property="og:image" content={ogImage} />}
       </Helmet>
 
