@@ -80,4 +80,8 @@
   },
   "addMore": "إضافة المزيد",
   "remove": "إزالة"
+  ,
+  "expectedSalary": "الراتب المتوقع",
+  "expectedSalaryPlaceholder": "أدخل الراتب المتوقع (أرقام فقط)",
+  "invalidSalary": "يرجى إدخال راتب صالح (أرقام فقط)"
 }

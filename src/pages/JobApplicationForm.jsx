@@ -248,6 +248,25 @@ const JobApplicationForm = () => {
         .required(t('joinUs:acceptTerms') || 'You must accept the terms'),
       customResponses: Yup.object(),
     });
+       // If backend indicates the salary field should be visible, include it in validation (optional)
+    if (jobPosition?.salaryFieldVisible) {
+      const salaryRequiredMsg = `${t('joinUs:expectedSalary') || 'Expected Salary'} ${t('joinUs:isRequired') || 'is required'}`;
+      schema = schema.shape({
+        expectedSalary: Yup.string()
+          .required(salaryRequiredMsg)
+          .test(
+            'digits-only',
+            t('joinUs:invalidSalary') || 'Please enter a valid salary (numbers only)',
+            (val) => {
+              if (val === undefined || val === null) return true; // let required handle emptiness
+              const s = String(val).trim();
+              if (s === '') return true; // required will trigger instead
+              return /^\d+$/.test(s);
+            }
+          ),
+      });
+    }
+
 
     // Build a detailed shape for customResponses to enforce required custom fields,
     // including groupField and repeatable_group types.
@@ -546,6 +565,14 @@ const JobApplicationForm = () => {
 
       // Use the base URL from env only
       // Send JSON payload with Cloudinary URLs
+      // Convert jobSpecsResponses object (map) to array of { jobSpecId, answer }
+      const jobSpecsResponsesArray = [];
+      if (values.jobSpecsResponses && typeof values.jobSpecsResponses === 'object') {
+        Object.keys(values.jobSpecsResponses).forEach((id) => {
+          jobSpecsResponsesArray.push({ jobSpecId: id, answer: !!values.jobSpecsResponses[id] });
+        });
+      }
+
       const payload = {
         jobPositionId: jobPosition._id,
         fullName: values.fullName,
@@ -554,9 +581,11 @@ const JobApplicationForm = () => {
         address: values.address,
         birthDate: values.birthDate,
         gender: values.gender,
+        expectedSalary: values.expectedSalary || undefined,
         profilePhoto: profilePhotoUrl,
         cvFilePath: cvUrl,
         customResponses: Object.keys(remappedCustomResponses || {}).length ? remappedCustomResponses : englishCustomResponses,
+        jobSpecsResponses: jobSpecsResponsesArray,
       };
 
       const response = await submitApplicant(payload);
@@ -656,6 +685,11 @@ const JobApplicationForm = () => {
       } else {
         acc[fieldKey] = '';
       }
+      return acc;
+    }, {}) || {},
+    jobSpecsResponses: jobPosition?.jobSpecs?.reduce((acc, spec, idx) => {
+      const id = (spec && (spec._id || spec.id)) || `spec_${idx}`;
+      acc[id] = false;
       return acc;
     }, {}) || {},
   };
@@ -793,24 +827,7 @@ const JobApplicationForm = () => {
             </div>
           )}
 
-          {/* Job Specifications */}
-          {jobPosition.jobSpecs && jobPosition.jobSpecs.length > 0 && (
-            <div className="mb-8">
-              <div className="p-6 bg-light-50 dark:bg-dark-800 rounded-xl border-2 border-light-200 dark:border-dark-600">
-                <h3 className="font-bold text-lg text-light-800 dark:text-white mb-4">
-                  {t('joinUs:jobSpecs') || 'Job Specifications'}
-                </h3>
-                <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                  {jobPosition.jobSpecs.map((spec, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="shrink-0 w-5 h-5 bg-primary-500 text-white rounded-full flex items-center justify-center text-xs font-bold mt-0.5">{i + 1}</span>
-                      <span className="text-sm text-light-700 dark:text-light-300">{getLocalizedText(spec.spec || spec)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+          
           
           <Formik
             initialValues={initialValues}
@@ -868,6 +885,36 @@ const JobApplicationForm = () => {
                   <h2 className="text-2xl font-bold text-light-900 dark:text-white mb-6">
                     {t('joinUs:applicationForm') || 'Application Form'}
                   </h2>
+
+                  {/* Job Specifications (inside Form so Formik context is available) */}
+                  {jobPosition.jobSpecs && jobPosition.jobSpecs.length > 0 && (
+                    <div className="mb-6 p-6 bg-light-50 dark:bg-dark-800 rounded-xl border-2 border-light-200 dark:border-dark-600">
+                      <h3 className="font-bold text-lg text-light-800 dark:text-white mb-4">
+                        {t('joinUs:jobSpecs') || 'Job Specifications'}
+                      </h3>
+                      <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                        {jobPosition.jobSpecs.map((spec, i) => {
+                          const specId = (spec && (spec._id || spec.id)) || `spec_${i}`;
+                          return (
+                            <div key={specId} className="flex items-start gap-2">
+                              <span className="shrink-0 w-5 h-5 bg-primary-500 text-white rounded-full flex items-center justify-center text-xs font-bold mt-0.5">{i + 1}</span>
+                              <label className="flex items-center justify-between w-full gap-3 cursor-pointer">
+                                <span className={`flex-1 text-sm text-light-700 dark:text-light-300 ${isArabic ? 'text-right' : 'text-left'}`}>{getLocalizedText(spec.spec || spec)}</span>
+                                <div className="flex items-center ml-4">
+                                  <Field type="checkbox" name={`jobSpecsResponses.${specId}`} className="sr-only peer" />
+                                  <div className="w-7 h-7 rounded-lg bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 peer-checked:bg-primary-500 peer-focus:ring-4 peer-focus:ring-primary-500/30 transition-all duration-300 flex items-center justify-center peer-checked:[&>svg]:scale-100 shadow-md">
+                                    <svg className="w-4 h-4 text-white scale-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
+                                </div>
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Profile Photo Upload - Circular */}
                   <div className="flex justify-center mb-8">
@@ -998,7 +1045,42 @@ const JobApplicationForm = () => {
                       )}
                     </div>
 
-  
+   {/* Expected Salary (visible only if backend enables salaryFieldVisible) */}
+                    {jobPosition?.salaryFieldVisible && (
+                      <div className="group">
+                        <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
+                          <div className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-3 0-5 2-5 5v3h10v-3c0-3-2-5-5-5z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2v4" />
+                            </svg>
+                            {t('joinUs:expectedSalary') || 'Expected Salary'}
+                          </div>
+                        </label>
+                        <input
+                          name="expectedSalary"
+                          inputMode="numeric"
+                          pattern="\d*"
+                          type="text"
+                          value={values.expectedSalary ?? ''}
+                          placeholder={t('joinUs:expectedSalaryPlaceholder') || t('joinUs:expectedSalary') || 'Expected Salary'}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D+/g, '');
+                            setFieldValue('expectedSalary', digits);
+                          }}
+                          onPaste={(e) => {
+                            e.preventDefault();
+                            const paste = (e.clipboardData || window.clipboardData).getData('text') || '';
+                            const digits = paste.replace(/\D+/g, '');
+                            setFieldValue('expectedSalary', digits);
+                          }}
+                          className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
+                        />
+                        {errors.expectedSalary && touched.expectedSalary && (
+                          <p className="mt-1 text-sm text-red-500">{errors.expectedSalary}</p>
+                        )}
+                      </div>
+                    )}
 
                     {/* Address */}
                     <div className="md:col-span-2 group">
@@ -1059,7 +1141,7 @@ const JobApplicationForm = () => {
                         name="gender"
                         className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200 cursor-pointer"
                       >
-                        <option value="">{t('contact:pleaseSelect') || 'Please select'}</option>
+                        <option value="">Please Select</option>
                         <option value="Male">{t('joinUs:male') || 'Male'}</option>
                         <option value="Female">{t('joinUs:female') || 'Female'}</option>
                       </Field>
@@ -1254,7 +1336,7 @@ const JobApplicationForm = () => {
                                     className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200 cursor-pointer"
                                   >
                                     <option value="" disabled>
-                                      {t('contact:pleaseSelect') || getLocalizedText(field.label)}
+                                      Please Select
                                     </option>
                                     {field.choices.map((choice, idx) => (
                                       <option key={idx} value={getLocalizedText(choice)}>
@@ -1427,8 +1509,10 @@ const JobApplicationForm = () => {
                                     sx={{
                                       color: 'var(--color-primary-500)',
                                       padding: '4px',
+                                      border: '1px solid rgba(0,0,0,0.06)',
+                                      borderRadius: '6px',
                                       '&.Mui-checked': { color: 'var(--color-primary-600)' },
-                                      '& .MuiSvgIcon-root': { fontSize: 24 },
+                                      '& .MuiSvgIcon-root': { fontSize: 30 },
                                     }}
                                   />
                                 </div>

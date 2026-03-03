@@ -80,4 +80,8 @@
   },
   "addMore": "Add More",
   "remove": "Remove"
+  ,
+  "expectedSalary": "Expected Salary",
+  "expectedSalaryPlaceholder": "Enter expected salary (numbers only)",
+  "invalidSalary": "Please enter a valid salary (numbers only)"
 }
