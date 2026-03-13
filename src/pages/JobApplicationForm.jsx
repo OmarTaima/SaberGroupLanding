@@ -568,8 +568,38 @@ const JobApplicationForm = () => {
       // Convert jobSpecsResponses object (map) to array of { jobSpecId, answer }
       const jobSpecsResponsesArray = [];
       if (values.jobSpecsResponses && typeof values.jobSpecsResponses === 'object') {
-        Object.keys(values.jobSpecsResponses).forEach((id) => {
-          jobSpecsResponsesArray.push({ jobSpecId: id, answer: !!values.jobSpecsResponses[id] });
+        Object.keys(values.jobSpecsResponses).forEach((key) => {
+          const answer = !!values.jobSpecsResponses[key];
+
+          // Default jobSpecId is the key; prefer resolving from jobPosition.jobSpecs
+          let jobSpecId = key;
+          let enLabel = '';
+
+          // If key was the generated `spec_{index}`, try to pick by index first
+          const match = key.match(/^spec_(\d+)$/);
+          if (match && jobPosition?.jobSpecs && jobPosition.jobSpecs[parseInt(match[1], 10)]) {
+            const s = jobPosition.jobSpecs[parseInt(match[1], 10)];
+            jobSpecId = typeof s === 'string' ? s : (s._id || s.id || jobSpecId);
+            if (typeof s === 'object') {
+              enLabel = extractStringFromRich(s.spec?.en || s.en || s.label?.en || '');
+            }
+          } else if (jobPosition?.jobSpecs) {
+            // Find spec by id in the jobPosition.jobSpecs array and read its english label
+            const found = jobPosition.jobSpecs.find((s) => {
+              const sid = (typeof s === 'string') ? s : (s._id || s.id || '');
+              return String(sid) === String(key);
+            });
+            if (found) {
+              const s = found;
+              jobSpecId = (typeof s === 'string') ? s : (s._id || s.id || jobSpecId);
+              if (typeof s === 'object') {
+                enLabel = extractStringFromRich(s.spec?.en || s.en || s.label?.en || '');
+              }
+            }
+          }
+
+          // Push only allowed fields (`jobSpecId` and `answer`) — server validation rejects extra `spec`
+          jobSpecsResponsesArray.push({ jobSpecId, answer });
         });
       }
 
@@ -1175,7 +1205,7 @@ const JobApplicationForm = () => {
                             <svg className="w-10 h-10 text-success-600" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                             </svg>
-                            <p className="text-xs text-success-700 font-semibold mt-1 text-center break-words w-full px-1" title={values.cvFile.name}>
+                            <p className="text-xs text-success-700 font-semibold mt-1 text-center wrap-break w-full px-1" title={values.cvFile.name}>
                               {values.cvFile.name.length > 15 ? values.cvFile.name.substring(0, 12) + '...' : values.cvFile.name}
                             </p>
                           </div>
