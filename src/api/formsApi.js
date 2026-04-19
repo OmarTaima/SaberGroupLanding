@@ -17,4 +17,14 @@ export async function submitApplicant(payload) {
   }
 }
 
-export default { submitApplicant };
+export async function checkExistingApplicant(params) {
+  try {
+    const res = await formClient.get('/public/applicants', { params });
+    return res.data;
+  } catch (err) {
+    // rethrow for caller to handle
+    throw err;
+  }
+}
+
+export default { submitApplicant, checkExistingApplicant };

@@ -8,6 +8,7 @@ import JoinUs from "./pages/JoinUs";
 import JobApplicationForm from "./pages/JobApplicationForm";
 import Contact from "./pages/Contact";
 import ComingSoon from "./pages/ComingSoon";
+import CheckPreviousApplication from "./pages/checkjob";
 import Navbar from "./components/Navbar";
 import "./index.css";
 
@@ -20,6 +21,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/join-us" element={<JoinUs />} />
           <Route path="/join-us/:slug" element={<JobApplicationForm />} />
+          <Route path="/join-us/check-application" element={<CheckPreviousApplication />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/coming-soon" element={<ComingSoon />} />
         </Routes>

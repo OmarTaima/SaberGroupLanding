@@ -125,6 +125,22 @@ const Footer = () => {
                     </svg>
                   </a>
 
+                  {/* Behance */}
+                  <a
+                    href="https://www.behance.net/ahmed_saber_"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-10 h-10 rounded-lg bg-dark-800 hover:bg-[#1769FF] flex items-center justify-center transition-colors duration-200 group"
+                  >
+                    <svg
+                      className="w-5 h-5 text-light-400 group-hover:text-white transition-colors"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M3 7v10h6.5c2.25 0 3.5-1.25 3.5-3.25 0-1.75-1.25-2.75-3-2.95V10c1.4-.15 2.5-1.1 2.5-2.5C12.5 6 11 5 8.5 5H3zm9 7.5c.83 0 1.5.67 1.5 1.5S12.83 17.5 12 17.5H9V14h3v.5zM16 8h5v2h-5V8zm0 4h5v6h-5v-6z" />
+                    </svg>
+                  </a>
+
                   {/* Instagram */}
                   <a
                     href="https://www.instagram.com/sabergroupstudios"

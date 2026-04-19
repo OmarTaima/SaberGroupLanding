@@ -6,7 +6,7 @@ import { Formik, Form, Field } from 'formik';
 import { Checkbox, FormHelperText } from '@mui/material';
 import * as Yup from 'yup';
 import axios from 'axios';
-import { submitApplicant } from '../api/formsApi';
+import { submitApplicant, checkExistingApplicant } from '../api/formsApi';
 import Swal from 'sweetalert2';
 import { useTranslation } from '../i18n/hooks/useTranslation';
 import { getJobPositions } from '../store/slices/jobPositionsSlice';
@@ -25,7 +25,45 @@ const JobApplicationForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState({});
 
+  const allowedProfilePhotoMimeTypes = ['image/jpeg', 'image/png'];
+  const allowedProfilePhotoExtensions = ['.jpg', '.jpeg', '.png'];
+  const allowedCvMimeTypes = ['application/pdf'];
+  const allowedCvExtensions = ['.pdf'];
+  const maxProfilePhotoFileSizeInBytes = 5 * 1024 * 1024;
+  const maxCvFileSizeInBytes = 10 * 1024 * 1024;
+  const maxExpectedSalaryValue = 100000;
+
   const jobPosition = positions.find((pos) => pos.slug === slug);
+
+  const baseFieldDefaults = {
+    fullName: { visible: true, required: true },
+    email: { visible: true, required: true },
+    phone: { visible: true, required: true },
+    gender: { visible: true, required: true },
+    birthDate: { visible: true, required: true },
+    address: { visible: true, required: true },
+    profilePhoto: { visible: true, required: true },
+    cvFilePath: { visible: true, required: false },
+    expectedSalary: {
+      visible: Boolean(jobPosition?.salaryFieldVisible),
+      required: Boolean(jobPosition?.salaryFieldVisible),
+    },
+  };
+
+  const getBaseFieldConfig = (fieldName) => {
+    const fallback = baseFieldDefaults[fieldName] || { visible: true, required: false };
+    const configured = jobPosition?.fieldConfig?.[fieldName] || {};
+    const visible = configured.visible ?? fallback.visible;
+    // Hidden fields must never be treated as required.
+    const required = Boolean(visible && (configured.required ?? fallback.required));
+    return {
+      visible: Boolean(visible),
+      required,
+    };
+  };
+
+  const isBaseFieldVisible = (fieldName) => getBaseFieldConfig(fieldName).visible;
+  const isBaseFieldRequired = (fieldName) => getBaseFieldConfig(fieldName).required;
 
   useEffect(() => {
     if (positions.length === 0) {
@@ -170,6 +208,101 @@ const JobApplicationForm = () => {
     }
   };
 
+  const leftRotate32 = (value, shift) => ((value << shift) | (value >>> (32 - shift))) >>> 0;
+
+  const sha1FallbackHex = (input) => {
+    const messageBytes = new TextEncoder().encode(input);
+    const originalBitLength = messageBytes.length * 8;
+
+    const withOne = new Uint8Array(messageBytes.length + 1);
+    withOne.set(messageBytes);
+    withOne[messageBytes.length] = 0x80;
+
+    const paddedLength = Math.ceil((withOne.length + 8) / 64) * 64;
+    const padded = new Uint8Array(paddedLength);
+    padded.set(withOne);
+
+    const view = new DataView(padded.buffer);
+    const highBits = Math.floor(originalBitLength / 0x100000000);
+    const lowBits = originalBitLength >>> 0;
+    view.setUint32(paddedLength - 8, highBits, false);
+    view.setUint32(paddedLength - 4, lowBits, false);
+
+    let h0 = 0x67452301;
+    let h1 = 0xEFCDAB89;
+    let h2 = 0x98BADCFE;
+    let h3 = 0x10325476;
+    let h4 = 0xC3D2E1F0;
+
+    const words = new Uint32Array(80);
+
+    for (let blockStart = 0; blockStart < paddedLength; blockStart += 64) {
+      for (let i = 0; i < 16; i += 1) {
+        words[i] = view.getUint32(blockStart + i * 4, false);
+      }
+
+      for (let i = 16; i < 80; i += 1) {
+        words[i] = leftRotate32(words[i - 3] ^ words[i - 8] ^ words[i - 14] ^ words[i - 16], 1);
+      }
+
+      let a = h0;
+      let b = h1;
+      let c = h2;
+      let d = h3;
+      let e = h4;
+
+      for (let i = 0; i < 80; i += 1) {
+        let f;
+        let k;
+
+        if (i < 20) {
+          f = (b & c) | ((~b) & d);
+          k = 0x5A827999;
+        } else if (i < 40) {
+          f = b ^ c ^ d;
+          k = 0x6ED9EBA1;
+        } else if (i < 60) {
+          f = (b & c) | (b & d) | (c & d);
+          k = 0x8F1BBCDC;
+        } else {
+          f = b ^ c ^ d;
+          k = 0xCA62C1D6;
+        }
+
+        const temp = (leftRotate32(a, 5) + f + e + k + words[i]) >>> 0;
+        e = d;
+        d = c;
+        c = leftRotate32(b, 30);
+        b = a;
+        a = temp;
+      }
+
+      h0 = (h0 + a) >>> 0;
+      h1 = (h1 + b) >>> 0;
+      h2 = (h2 + c) >>> 0;
+      h3 = (h3 + d) >>> 0;
+      h4 = (h4 + e) >>> 0;
+    }
+
+    return [h0, h1, h2, h3, h4]
+      .map((num) => num.toString(16).padStart(8, '0'))
+      .join('');
+  };
+
+  const buildSha1Hex = async (input) => {
+    const subtle = globalThis.crypto?.subtle;
+
+    if (subtle?.digest) {
+      const data = new TextEncoder().encode(input);
+      const hashBuffer = await subtle.digest('SHA-1', data);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+    }
+
+    return sha1FallbackHex(input);
+  };
+
   const uploadToCloudinary = async (file) => {
     const API_KEY = import.meta.env.VITE_CLOUDINARY_API_KEY;
     const API_SECRET = import.meta.env.VITE_CLOUDINARY_API_SECRET;
@@ -190,13 +323,8 @@ const JobApplicationForm = () => {
     
     // Create signature string (params in alphabetical order)
     const signatureString = `folder=${folder}&timestamp=${timestamp}${API_SECRET}`;
-    
-    // Generate SHA-1 hash (using browser's crypto API)
-    const encoder = new TextEncoder();
-    const data = encoder.encode(signatureString);
-    const hashBuffer = await crypto.subtle.digest('SHA-1', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const signature = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const signature = await buildSha1Hex(signatureString);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -226,46 +354,394 @@ const JobApplicationForm = () => {
     });
   };
 
+  const hasAllowedExtension = (fileName, extensions) => {
+    const normalizedName = (fileName || '').toLowerCase();
+    return extensions.some((ext) => normalizedName.endsWith(ext));
+  };
+
+  const isFileWithinSizeLimit = (file, maxSizeInBytes) => {
+    if (!file || typeof file.size !== 'number') return false;
+    return file.size <= maxSizeInBytes;
+  };
+
+  const getDisplayFileName = (file, maxLength = 15, previewLength = 12) => {
+    const rawName = typeof file?.name === 'string' ? file.name.trim() : '';
+    if (!rawName) return '';
+    return rawName.length > maxLength ? `${rawName.substring(0, previewLength)}...` : rawName;
+  };
+
+  const isAllowedProfilePhotoFile = (file) => {
+    if (!file) return false;
+    const normalizedType = (file.type || '').toLowerCase();
+    return (
+      allowedProfilePhotoMimeTypes.includes(normalizedType) ||
+      hasAllowedExtension(file.name, allowedProfilePhotoExtensions)
+    );
+  };
+
+  const isAllowedCvFile = (file) => {
+    if (!file) return false;
+    const normalizedType = (file.type || '').toLowerCase();
+    return allowedCvMimeTypes.includes(normalizedType) || hasAllowedExtension(file.name, allowedCvExtensions);
+  };
+
+  const getExactRequestErrorMessage = (error) => {
+    const fallback = t('joinUs:submissionError') || 'Failed to submit application';
+
+    if (!error) return fallback;
+
+    const responseData = error.response?.data;
+
+    if (typeof responseData === 'string' && responseData.trim()) {
+      return responseData;
+    }
+
+    if (typeof responseData?.message === 'string' && responseData.message.trim()) {
+      return responseData.message;
+    }
+
+    if (Array.isArray(responseData?.errors) && responseData.errors.length > 0) {
+      const firstError = responseData.errors[0];
+      if (typeof firstError === 'string' && firstError.trim()) return firstError;
+      if (typeof firstError?.message === 'string' && firstError.message.trim()) return firstError.message;
+      if (typeof firstError?.msg === 'string' && firstError.msg.trim()) return firstError.msg;
+    }
+
+    if (typeof responseData?.error?.message === 'string' && responseData.error.message.trim()) {
+      return responseData.error.message;
+    }
+
+    if (typeof error.message === 'string' && error.message.trim()) {
+      return error.message;
+    }
+
+    return fallback;
+  };
+
+  const createTrimmedStringSchema = () =>
+    Yup.string().transform((value, originalValue) => {
+      if (typeof originalValue !== 'string') return value;
+      return originalValue.trim();
+    });
+
+  const hasMeaningfulValue = (value) => {
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string') return value.trim() !== '';
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  };
+
+  const hasAnyFilledValue = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return Object.values(value).some((entry) => hasMeaningfulValue(entry));
+  };
+
+  const getFirstErrorText = (errorNode) => {
+    if (!errorNode) return '';
+    if (typeof errorNode === 'string') return errorNode;
+
+    if (Array.isArray(errorNode)) {
+      for (const item of errorNode) {
+        const nestedError = getFirstErrorText(item);
+        if (nestedError) return nestedError;
+      }
+      return '';
+    }
+
+    if (typeof errorNode === 'object') {
+      for (const key of Object.keys(errorNode)) {
+        const nestedError = getFirstErrorText(errorNode[key]);
+        if (nestedError) return nestedError;
+      }
+    }
+
+    return '';
+  };
+
+  const getAllowedChoiceValues = (choices = []) => {
+    return choices
+      .map((choice) => getLocalizedText(choice))
+      .map((value) => (typeof value === 'string' ? value.trim() : String(value || '').trim()))
+      .filter((value) => value !== '');
+  };
+
+  const createCustomFieldSchema = (fieldDefinition, fieldLabel, isRequired = false) => {
+    const requiredMsg = `${fieldLabel} ${t('joinUs:isRequired') || 'is required'}`;
+
+    switch (fieldDefinition?.inputType) {
+      case 'email': {
+        let schema = createTrimmedStringSchema().email(
+          t('joinUs:invalidEmail') || 'Please enter a valid email address'
+        );
+        if (isRequired) schema = schema.required(requiredMsg);
+        return schema;
+      }
+
+      case 'number': {
+        let schema = createTrimmedStringSchema().test(
+          'valid-number',
+          t('joinUs:invalidNumber') || 'Please enter a valid number',
+          (value) => {
+            if (!value) return true;
+            return /^-?\d+(\.\d+)?$/.test(value);
+          }
+        );
+        if (isRequired) schema = schema.required(requiredMsg);
+        return schema;
+      }
+
+      case 'url': {
+        let schema = createTrimmedStringSchema().url(
+          t('joinUs:invalidUrl') || 'Please enter a valid URL'
+        );
+        if (isRequired) schema = schema.required(requiredMsg);
+        return schema;
+      }
+
+      case 'date': {
+        let schema = Yup.date()
+          .nullable()
+          .transform((value, originalValue) => {
+            if (originalValue === '' || originalValue === null || originalValue === undefined) return null;
+            return value;
+          })
+          .typeError(t('joinUs:invalidDate') || 'Please enter a valid date')
+          .max(new Date(), t('joinUs:invalidFutureDate') || 'Date cannot be in the future');
+
+        if (isRequired) schema = schema.required(requiredMsg);
+        return schema;
+      }
+
+      case 'dropdown':
+      case 'radio': {
+        const allowedChoices = getAllowedChoiceValues(fieldDefinition?.choices || []);
+        let schema = createTrimmedStringSchema().test(
+          'valid-choice',
+          t('joinUs:invalidSelection') || 'Please select a valid option',
+          (value) => {
+            if (!value) return true;
+            return allowedChoices.includes(value);
+          }
+        );
+
+        if (isRequired) schema = schema.required(requiredMsg);
+        return schema;
+      }
+
+      case 'textarea': {
+        let schema = createTrimmedStringSchema().max(
+          2000,
+          t('joinUs:textTooLong') || 'This field is too long'
+        );
+
+        if (isRequired) {
+          schema = schema
+            .required(requiredMsg)
+            .min(2, t('joinUs:textTooShort') || 'Please enter at least 2 characters');
+        }
+
+        return schema;
+      }
+
+      default: {
+        let schema = createTrimmedStringSchema().max(
+          255,
+          t('joinUs:textTooLong') || 'This field is too long'
+        );
+
+        if (isRequired) {
+          schema = schema
+            .required(requiredMsg)
+            .min(2, t('joinUs:textTooShort') || 'Please enter at least 2 characters');
+        }
+
+        return schema;
+      }
+    }
+  };
+
   const createValidationSchema = () => {
-    let schema = Yup.object().shape({
-      profilePhotoFile: Yup.mixed().required(
-        isArabic
-          ? 'مطلوب رفع صوره'
-          : `${t('joinUs:photo') || 'Photo'} ${t('joinUs:isRequired') || 'is required'}`
-      ),
-      fullName: Yup.string().required(`${t('joinUs:fullName') || 'Full Name'} ${t('joinUs:isRequired') || 'is required'}`),
-      email: Yup.string()
-        .email(t('joinUs:invalidEmail') || 'Invalid email')
-        .required(`${t('joinUs:email') || 'Email'} ${t('joinUs:isRequired') || 'is required'}`),
-      phone: Yup.string()
-        .matches(/^(\+\d{1,3}[- ]?)?\d{10,15}$/, t('joinUs:invalidPhone') || 'Invalid phone number')
-        .required(`${t('joinUs:phone') || 'Phone'} ${t('joinUs:isRequired') || 'is required'}`),
-      address: Yup.string().required(`${t('joinUs:address') || 'Address'} ${t('joinUs:isRequired') || 'is required'}`),
-      birthDate: Yup.date().nullable().required(`${t('joinUs:dateOfBirth') || 'Birth Date'} ${t('joinUs:isRequired') || 'is required'}`),
-      gender: Yup.string().required(`${t('joinUs:gender') || 'Gender'} ${t('joinUs:isRequired') || 'is required'}`),
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const oldestAllowedBirthDate = new Date(today);
+    oldestAllowedBirthDate.setFullYear(today.getFullYear() - 100);
+
+    const schemaShape = {
       agreedToTerms: Yup.boolean()
         .oneOf([true], t('joinUs:acceptTerms') || 'You must accept the terms')
         .required(t('joinUs:acceptTerms') || 'You must accept the terms'),
       customResponses: Yup.object(),
-    });
-       // If backend indicates the salary field should be visible, include it in validation (optional)
-    if (jobPosition?.salaryFieldVisible) {
-      const salaryRequiredMsg = `${t('joinUs:expectedSalary') || 'Expected Salary'} ${t('joinUs:isRequired') || 'is required'}`;
-      schema = schema.shape({
-        expectedSalary: Yup.string()
-          .required(salaryRequiredMsg)
-          .test(
-            'digits-only',
-            t('joinUs:invalidSalary') || 'Please enter a valid salary (numbers only)',
-            (val) => {
-              if (val === undefined || val === null) return true; // let required handle emptiness
-              const s = String(val).trim();
-              if (s === '') return true; // required will trigger instead
-              return /^\d+$/.test(s);
-            }
-          ),
-      });
+    };
+
+    if (isBaseFieldVisible('profilePhoto')) {
+      let profilePhotoSchema = Yup.mixed()
+        .nullable()
+        .test(
+          'image-only',
+          t('joinUs:invalidPhotoType') || 'Only JPG, JPEG, and PNG files are allowed',
+          (file) => !file || isAllowedProfilePhotoFile(file)
+        )
+        .test(
+          'photo-size',
+          t('joinUs:photoTooLarge') || 'Photo file size must be 5 MB or less',
+          (file) => !file || isFileWithinSizeLimit(file, maxProfilePhotoFileSizeInBytes)
+        );
+
+      if (isBaseFieldRequired('profilePhoto')) {
+        profilePhotoSchema = profilePhotoSchema.required(
+          t('joinUs:photoRequired') || `${t('joinUs:photo') || 'Photo'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      } else {
+        profilePhotoSchema = profilePhotoSchema.nullable();
+      }
+
+      schemaShape.profilePhotoFile = profilePhotoSchema;
     }
+
+    if (isBaseFieldVisible('cvFilePath')) {
+      let cvSchema = Yup.mixed()
+        .nullable()
+        .test(
+          'pdf-only',
+          t('joinUs:invalidCVType') || 'Only PDF files are allowed',
+          (file) => !file || isAllowedCvFile(file)
+        )
+        .test(
+          'cv-size',
+          t('joinUs:cvTooLarge') || 'CV file size must be 10 MB or less',
+          (file) => !file || isFileWithinSizeLimit(file, maxCvFileSizeInBytes)
+        );
+
+      if (isBaseFieldRequired('cvFilePath')) {
+        cvSchema = cvSchema.required(
+          t('joinUs:cvRequired') || `${t('joinUs:uploadCV') || 'CV'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      }
+
+      schemaShape.cvFile = cvSchema;
+    }
+
+    if (isBaseFieldVisible('fullName')) {
+      let fullNameSchema = createTrimmedStringSchema()
+        .min(2, t('joinUs:fullNameTooShort') || 'Full name must be at least 2 characters')
+        .max(100, t('joinUs:fullNameTooLong') || 'Full name must be 100 characters or less')
+        .matches(/^[A-Za-z\u0600-\u06FF][A-Za-z\u0600-\u06FF\s.'’-]*$/, {
+          message:
+            t('joinUs:invalidFullName') ||
+            'Full name can only include letters, spaces, apostrophes, dots, and hyphens',
+          excludeEmptyString: true,
+        });
+
+      if (isBaseFieldRequired('fullName')) {
+        fullNameSchema = fullNameSchema.required(
+          `${t('joinUs:fullName') || 'Full Name'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      }
+      schemaShape.fullName = fullNameSchema;
+    }
+
+    if (isBaseFieldVisible('email')) {
+      let emailSchema = createTrimmedStringSchema().email(t('joinUs:invalidEmail') || 'Invalid email');
+      if (isBaseFieldRequired('email')) {
+        emailSchema = emailSchema.required(`${t('joinUs:email') || 'Email'} ${t('joinUs:isRequired') || 'is required'}`);
+      }
+      schemaShape.email = emailSchema;
+    }
+
+    if (isBaseFieldVisible('phone')) {
+      let phoneSchema = createTrimmedStringSchema().matches(/^01[0125]\d{8}$/, {
+        message: t('joinUs:invalidPhone') || 'Invalid phone number',
+        excludeEmptyString: true,
+      });
+
+      if (isBaseFieldRequired('phone')) {
+        phoneSchema = phoneSchema.required(`${t('joinUs:phone') || 'Phone'} ${t('joinUs:isRequired') || 'is required'}`);
+      }
+
+      schemaShape.phone = phoneSchema;
+    }
+
+    if (isBaseFieldVisible('address')) {
+      let addressSchema = createTrimmedStringSchema()
+        .min(5, t('joinUs:addressTooShort') || 'Address must be at least 5 characters')
+        .max(250, t('joinUs:addressTooLong') || 'Address must be 250 characters or less');
+
+      if (isBaseFieldRequired('address')) {
+        addressSchema = addressSchema.required(
+          `${t('joinUs:address') || 'Address'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      }
+      schemaShape.address = addressSchema;
+    }
+
+    if (isBaseFieldVisible('birthDate')) {
+      let birthDateSchema = Yup.date()
+        .nullable()
+        .transform((value, originalValue) => (originalValue === '' ? null : value))
+        .typeError(t('joinUs:invalidBirthDate') || 'Please enter a valid birth date')
+        .max(today, t('joinUs:futureBirthDate') || 'Birth date cannot be in the future')
+        .min(
+          oldestAllowedBirthDate,
+          t('joinUs:invalidBirthDateRange') || 'Birth date seems too far in the past'
+        );
+
+      if (isBaseFieldRequired('birthDate')) {
+        birthDateSchema = birthDateSchema.required(
+          `${t('joinUs:dateOfBirth') || 'Birth Date'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      }
+
+      schemaShape.birthDate = birthDateSchema;
+    }
+
+    if (isBaseFieldVisible('gender')) {
+      let genderSchema = createTrimmedStringSchema().oneOf(
+        ['Male', 'Female'],
+        t('joinUs:invalidGender') || 'Please select a valid gender'
+      );
+
+      if (isBaseFieldRequired('gender')) {
+        genderSchema = genderSchema.required(`${t('joinUs:gender') || 'Gender'} ${t('joinUs:isRequired') || 'is required'}`);
+      }
+      schemaShape.gender = genderSchema;
+    }
+
+    if (isBaseFieldVisible('expectedSalary')) {
+      let expectedSalarySchema = createTrimmedStringSchema()
+        .test(
+          'digits-only',
+          t('joinUs:invalidSalary') || 'Please enter a valid salary (numbers only)',
+          (val) => {
+            if (val === undefined || val === null) return true;
+            const s = String(val).trim();
+            if (s === '') return true;
+            return /^\d+$/.test(s);
+          }
+        )
+        .test(
+          'salary-range',
+          t('joinUs:invalidSalaryRange') ||
+            `Expected salary must be between 1 and ${maxExpectedSalaryValue.toLocaleString()}`,
+          (val) => {
+            if (val === undefined || val === null) return true;
+            const s = String(val).trim();
+            if (s === '') return true;
+            const numericValue = Number(s);
+            return Number.isInteger(numericValue) && numericValue >= 1 && numericValue <= maxExpectedSalaryValue;
+          }
+        );
+
+      if (isBaseFieldRequired('expectedSalary')) {
+        expectedSalarySchema = expectedSalarySchema.required(
+          `${t('joinUs:expectedSalary') || 'Expected Salary'} ${t('joinUs:isRequired') || 'is required'}`
+        );
+      }
+
+      schemaShape.expectedSalary = expectedSalarySchema;
+    }
+
+    let schema = Yup.object().shape(schemaShape);
 
 
     // Build a detailed shape for customResponses to enforce required custom fields,
@@ -292,40 +768,35 @@ const JobApplicationForm = () => {
         case 'groupField': {
           // Single object with subfields
           const groupShape = {};
+          const requiredSubKeys = [];
+
           (field.groupFields || []).forEach((sub) => {
             const subKey = getFieldKey(sub);
             const subLabel = getLocalizedText(sub.label) || subKey;
-            if (sub.isRequired) {
-              groupShape[subKey] = Yup.mixed().required(`${subLabel} ${t('joinUs:isRequired') || 'is required'}`);
-            } else {
-              groupShape[subKey] = Yup.mixed();
-            }
+            if (sub.isRequired) requiredSubKeys.push(subKey);
+            // Requiredness for subfields is enforced conditionally in the object-level test.
+            groupShape[subKey] = createCustomFieldSchema(sub, subLabel, false);
           });
-          let objSchema = Yup.object().shape(groupShape);
-          if (field.isRequired) {
-            objSchema = objSchema.test('group-required', requiredMsg, (val) => {
-              if (!val) return false;
 
-              // Collect required subfield keys from the original field definition
-              const requiredSubKeys = (field.groupFields || [])
-                .filter((s) => s.isRequired)
-                .map((s) => getFieldKey(s));
+          const objSchema = Yup.object()
+            .shape(groupShape)
+            .test('group-required', requiredMsg, (val) => {
+              const externalGroupValue = Array.isArray(repeatableGroups[fieldKey])
+                ? repeatableGroups[fieldKey][0]
+                : undefined;
+              const candidate = hasAnyFilledValue(val) ? val : externalGroupValue;
 
-              // If there are no required subfields, consider the group satisfied
+              const shouldEnforceRequiredSubfields = Boolean(field.isRequired || hasAnyFilledValue(candidate));
+              if (!shouldEnforceRequiredSubfields) return true;
+
+              if (!candidate || !hasAnyFilledValue(candidate)) return false;
+
+              // If the group has no required subfields, any non-empty group value is acceptable.
               if (requiredSubKeys.length === 0) return true;
 
-              // Ensure each required subfield has a meaningful value
-              return requiredSubKeys.every((k) => {
-                const v = val && Object.prototype.hasOwnProperty.call(val, k) ? val[k] : undefined;
-                if (v === undefined || v === null) return false;
-                if (typeof v === 'string') return v.trim() !== '';
-                if (Array.isArray(v)) return v.length > 0;
-                if (typeof v === 'object') return Object.keys(v).length > 0;
-                // for booleans/numbers/etc, accept non-null values
-                return true;
-              });
+              return requiredSubKeys.every((k) => hasMeaningfulValue(candidate[k]));
             });
-          }
+
           customShape[fieldKey] = objSchema;
           break;
         }
@@ -333,40 +804,43 @@ const JobApplicationForm = () => {
         case 'repeatable_group': {
           // Array of objects; enforce min length if required and per-item required subfields
           const itemShape = {};
+          const requiredSubKeys = [];
+
           (field.groupFields || []).forEach((sub) => {
             const subKey = getFieldKey(sub);
             const subLabel = getLocalizedText(sub.label) || subKey;
-            if (sub.isRequired) {
-              itemShape[subKey] = Yup.mixed().required(`${subLabel} ${t('joinUs:isRequired') || 'is required'}`);
-            } else {
-              itemShape[subKey] = Yup.mixed();
-            }
+            if (sub.isRequired) requiredSubKeys.push(subKey);
+            // Requiredness for subfields is enforced per filled row.
+            itemShape[subKey] = createCustomFieldSchema(sub, subLabel, false);
           });
+
           // Keep the per-item shape but allow empty objects; when the group is marked required,
           // ensure at least one item has all required subfields filled.
-          const perItemSchema = Yup.object().shape(itemShape);
+          const perItemSchema = Yup.object()
+            .shape(itemShape)
+            .test('repeatable-item-required-subfields', requiredMsg, (item) => {
+              if (!hasAnyFilledValue(item)) return true;
+              if (requiredSubKeys.length === 0) return true;
+              return requiredSubKeys.every((k) => hasMeaningfulValue(item?.[k]));
+            });
+
           let arrSchema = Yup.array().of(perItemSchema);
 
           if (field.isRequired) {
-            const requiredSubKeys = (field.groupFields || [])
-              .filter((s) => s.isRequired)
-              .map((s) => getFieldKey(s));
-
             arrSchema = arrSchema.test('repeatable-required', requiredMsg, (arr) => {
               // Also check the local repeatableGroups state (where the inputs write their values)
               const external = repeatableGroups[fieldKey];
 
               const checkArray = (a) => {
                 if (!a || !Array.isArray(a) || a.length === 0) return false;
-                if (requiredSubKeys.length === 0) return a.length > 0;
+
                 return a.some((item) => {
+                  if (!hasAnyFilledValue(item)) return false;
+                  if (requiredSubKeys.length === 0) return true;
+
                   return requiredSubKeys.every((k) => {
                     const v = item && Object.prototype.hasOwnProperty.call(item, k) ? item[k] : undefined;
-                    if (v === undefined || v === null) return false;
-                    if (typeof v === 'string') return v.trim() !== '';
-                    if (Array.isArray(v)) return v.length > 0;
-                    if (typeof v === 'object') return Object.keys(v).length > 0;
-                    return true;
+                    return hasMeaningfulValue(v);
                   });
                 });
               };
@@ -396,11 +870,7 @@ const JobApplicationForm = () => {
 
         default: {
           // text, textarea, dropdown, radio, date, number, url, etc.
-          if (field.isRequired) {
-            customShape[fieldKey] = Yup.mixed().required(requiredMsg);
-          } else {
-            customShape[fieldKey] = Yup.mixed();
-          }
+          customShape[fieldKey] = createCustomFieldSchema(field, fieldLabel, Boolean(field.isRequired));
           break;
         }
       }
@@ -413,44 +883,78 @@ const JobApplicationForm = () => {
     return schema;
   };
 
-  const handleRepeatableGroupChange = (groupId, index, subFieldId, value) => {
-    setRepeatableGroups((prev) => {
-      const newGroups = { ...prev };
-      if (!newGroups[groupId]) newGroups[groupId] = [{}];
-      if (!newGroups[groupId][index]) newGroups[groupId][index] = {};
-      newGroups[groupId][index][subFieldId] = value;
-      return newGroups;
-    });
-  };
-
-  const addRepeatableGroup = (groupId) => {
-    setRepeatableGroups((prev) => ({
-      ...prev,
-      [groupId]: [...(prev[groupId] || []), {}],
-    }));
-  };
-
-  const removeRepeatableGroup = (groupId, index) => {
-    setRepeatableGroups((prev) => ({
-      ...prev,
-      [groupId]: prev[groupId].filter((_, i) => i !== index),
-    }));
-  };
-
   const handleFormSubmit = async (values, { setSubmitting }) => {
     setIsSubmitting(true);
 
     try {
+      const applicantEmail = isBaseFieldVisible('email') ? (values.email || '').trim() : '';
+      const applicantPhone = isBaseFieldVisible('phone') ? (values.phone || '').trim() : '';
+      const rawCompanyId =
+        jobPosition?.companyId?._id ||
+        jobPosition?.companyId ||
+        jobPosition?.company?._id ||
+        jobPosition?.company ||
+        company?._id ||
+        '';
+      const companyId = typeof rawCompanyId === 'string' ? rawCompanyId : rawCompanyId?._id || '';
+
+      let hasPreviousApplication = false;
+      if (applicantEmail || applicantPhone) {
+        const existingApplicantResponse = await checkExistingApplicant({
+          email: applicantEmail,
+          companyId,
+          phone: applicantPhone,
+        });
+
+        const existingApplicants = Array.isArray(existingApplicantResponse?.data)
+          ? existingApplicantResponse.data
+          : [];
+        hasPreviousApplication =
+          existingApplicants.length > 0 || Number(existingApplicantResponse?.TotalCount || 0) > 0;
+      }
+
+      if (hasPreviousApplication) {
+        const proceedResult = await Swal.fire({
+          icon: 'warning',
+          title: isArabic ? 'تم التقديم مسبقًا' : 'Previous Application Found',
+          text:
+            isArabic
+              ? 'لقد قمت بالتقديم على هذه الشركة من قبل. هل تريد إكمال التقديم مرة أخرى؟'
+              : 'You already applied for this company before. Do you want to proceed with this application?',
+          showCancelButton: true,
+          confirmButtonText: t('common:Yes') || (isArabic ? 'نعم، أكمل' : 'Yes, proceed'),
+          cancelButtonText: t('common:No') || (isArabic ? 'لا' : 'No'),
+          confirmButtonColor: '#f59e0b',
+          cancelButtonColor: '#6b7280',
+        });
+
+        if (!proceedResult.isConfirmed) {
+          return;
+        }
+      }
+
       const finalCustomResponses = { ...values.customResponses };
+      const customFieldByKey = new Map(
+        (jobPosition?.customFields || []).map((field) => [getFieldKey(field), field])
+      );
+
       Object.keys(repeatableGroups).forEach((groupId) => {
-        const groups = repeatableGroups[groupId];
-        if (groups && Array.isArray(groups) && groups.length > 0) {
-          const validGroups = groups.filter((group) =>
-            Object.values(group).some((value) => value && value.toString().trim() !== '')
-          );
-          if (validGroups.length > 0) {
-            finalCustomResponses[groupId] = validGroups;
-          }
+        const fieldDefinition = customFieldByKey.get(groupId);
+        const groups = Array.isArray(repeatableGroups[groupId]) ? repeatableGroups[groupId] : [];
+        const validGroups = groups.filter((group) => hasAnyFilledValue(group));
+
+        if (fieldDefinition?.inputType === 'groupField') {
+          finalCustomResponses[groupId] = validGroups[0] || {};
+          return;
+        }
+
+        if (fieldDefinition?.inputType === 'repeatable_group') {
+          finalCustomResponses[groupId] = validGroups;
+          return;
+        }
+
+        if (validGroups.length > 0) {
+          finalCustomResponses[groupId] = validGroups;
         }
       });
 
@@ -458,7 +962,7 @@ const JobApplicationForm = () => {
       let profilePhotoUrl = '';
       let cvUrl = '';
 
-      if (values.profilePhotoFile) {
+      if (isBaseFieldVisible('profilePhoto') && values.profilePhotoFile) {
         Swal.fire({
           title: t('joinUs:uploadingPhoto') || 'Uploading photo...',
           allowOutsideClick: false,
@@ -468,7 +972,7 @@ const JobApplicationForm = () => {
         Swal.close();
       }
 
-      if (values.cvFile) {
+      if (isBaseFieldVisible('cvFilePath') && values.cvFile) {
         Swal.fire({
           title: t('joinUs:uploadingCV') || 'Uploading CV...',
           allowOutsideClick: false,
@@ -603,20 +1107,36 @@ const JobApplicationForm = () => {
         });
       }
 
+      const normalizeOptionalValue = (value) => {
+        if (value === undefined || value === null) return undefined;
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          return trimmed === '' ? undefined : trimmed;
+        }
+        return value;
+      };
+
+      const withVisibility = (fieldName, value) => {
+        if (!isBaseFieldVisible(fieldName)) return undefined;
+        return normalizeOptionalValue(value);
+      };
+
       const payload = {
         jobPositionId: jobPosition._id,
-        fullName: values.fullName,
-        email: values.email,
-        phone: values.phone,
-        address: values.address,
-        birthDate: values.birthDate,
-        gender: values.gender,
-        expectedSalary: values.expectedSalary || undefined,
-        profilePhoto: profilePhotoUrl,
-        cvFilePath: cvUrl,
+        fullName: withVisibility('fullName', values.fullName),
+        email: withVisibility('email', applicantEmail),
+        phone: withVisibility('phone', applicantPhone),
+        address: withVisibility('address', values.address),
+        birthDate: withVisibility('birthDate', values.birthDate),
+        gender: withVisibility('gender', values.gender),
+        expectedSalary: withVisibility('expectedSalary', values.expectedSalary),
+        profilePhoto: withVisibility('profilePhoto', profilePhotoUrl),
+        cvFilePath: withVisibility('cvFilePath', cvUrl),
         customResponses: Object.keys(remappedCustomResponses || {}).length ? remappedCustomResponses : englishCustomResponses,
         jobSpecsResponses: jobSpecsResponsesArray,
       };
+
+  
 
       const response = await submitApplicant(payload);
 
@@ -633,10 +1153,12 @@ const JobApplicationForm = () => {
     } catch (error) {
       console.debug('Error submitting application:', error);
       console.debug('Error response:', error.response?.data);
+      const exactErrorMessage = getExactRequestErrorMessage(error);
+      Swal.close();
       await Swal.fire({
         icon: 'error',
         title: t('joinUs:error') || 'Error',
-        text: error.response?.data?.message || t('joinUs:submissionError') || 'Failed to submit application',
+        text: exactErrorMessage,
         confirmButtonText: t('common:ok') || 'OK',
         confirmButtonColor: '#ef4444',
       });
@@ -701,6 +1223,7 @@ const JobApplicationForm = () => {
     address: '',
     birthDate: '',
     gender: '',
+    expectedSalary: '',
     profilePhotoFile: null,
     cvFile: null,
     agreedToTerms: false,
@@ -865,7 +1388,19 @@ const JobApplicationForm = () => {
             onSubmit={handleFormSubmit}
           >
             {(formikProps) => {
-              const { values, errors, touched, setFieldValue, isSubmitting: formikIsSubmitting, setTouched, validateForm, submitForm } = formikProps;
+              const {
+                values,
+                errors,
+                touched,
+                setFieldValue,
+                isSubmitting: formikIsSubmitting,
+                setTouched,
+                validateForm,
+                submitForm,
+                submitCount,
+              } = formikProps;
+              const cvFullFileName = typeof values.cvFile?.name === 'string' ? values.cvFile.name.trim() : '';
+              const cvDisplayFileName = getDisplayFileName(values.cvFile);
 
               const handleSubmitWithScroll = async (e) => {
                 if (e && e.preventDefault) e.preventDefault();
@@ -874,14 +1409,11 @@ const JobApplicationForm = () => {
                   scrollToFirstError(formErrors);
 
                   // derive first error message (handle nested customResponses)
-                  let firstErrorMessage = '';
                   const firstErrorKey = Object.keys(formErrors)[0];
-                  if (firstErrorKey === 'customResponses' && typeof formErrors[firstErrorKey] === 'object') {
-                    const nestedKey = Object.keys(formErrors[firstErrorKey])[0];
-                    firstErrorMessage = formErrors[firstErrorKey][nestedKey];
-                  } else {
-                    firstErrorMessage = formErrors[firstErrorKey];
-                  }
+                  const firstErrorMessage =
+                    getFirstErrorText(formErrors[firstErrorKey]) ||
+                    t('joinUs:validationError') ||
+                    'Please review the highlighted fields';
 
                   // mark touched for all error fields so validation messages appear
                   const allTouched = {};
@@ -947,16 +1479,30 @@ const JobApplicationForm = () => {
                   )}
 
                   {/* Profile Photo Upload - Circular */}
+                  {isBaseFieldVisible('profilePhoto') && (
                   <div className="flex justify-center mb-8">
                     <input
                       type="file"
                       id="profile-photo-upload"
                       name="profilePhotoFile"
-                      accept="image/*"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                       hidden
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          setFieldValue('profilePhotoFile', e.target.files[0]);
+                          const selectedFile = e.target.files[0];
+                          if (isAllowedProfilePhotoFile(selectedFile)) {
+                            setFieldValue('profilePhotoFile', selectedFile);
+                          } else {
+                            setFieldValue('profilePhotoFile', null);
+                            e.target.value = '';
+                            Swal.fire({
+                              icon: 'warning',
+                              title: t('joinUs:validationError') || 'Validation Error',
+                              text: t('joinUs:invalidPhotoType') || 'Only JPG, JPEG, and PNG files are allowed',
+                              confirmButtonText: t('common:ok') || 'OK',
+                              confirmButtonColor: '#f59e0b',
+                            });
+                          }
                         }
                       }}
                     />
@@ -987,6 +1533,7 @@ const JobApplicationForm = () => {
                       </div>
                       <p className="text-sm text-center mt-3 text-light-700 dark:text-light-300 group-hover:text-primary-600 font-semibold transition-colors">
                         {values.profilePhotoFile ? t('joinUs:changePhoto') || 'Change Photo' : t('joinUs:uploadPhoto') || 'Upload Photo'}
+                        {isBaseFieldRequired('profilePhoto') && <span className="text-red-500 ml-1">*</span>}
                       </p>
 
                       {errors.profilePhotoFile && touched.profilePhotoFile && (
@@ -994,6 +1541,7 @@ const JobApplicationForm = () => {
                       )}
                     </label>
                   </div>
+                  )}
 
                   {/* Personal Information Section */}
                   <div className="md:col-span-2 mb-4">
@@ -1013,13 +1561,14 @@ const JobApplicationForm = () => {
 
                   <div className="grid md:grid-cols-2 gap-6 mb-8">
                     {/* Full Name */}
+                    {isBaseFieldVisible('fullName') && (
                     <div className="md:col-span-2 group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                           </svg>
-                          {t('joinUs:fullName') || 'Full Name'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:fullName') || 'Full Name'} {isBaseFieldRequired('fullName') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
@@ -1032,15 +1581,17 @@ const JobApplicationForm = () => {
                         <p className="mt-1 text-sm text-red-500">{errors.fullName}</p>
                       )}
                     </div>
+                    )}
 
                     {/* Email */}
+                    {isBaseFieldVisible('email') && (
                     <div className="group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
-                          {t('joinUs:email') || 'Email'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:email') || 'Email'} {isBaseFieldRequired('email') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
@@ -1053,30 +1604,47 @@ const JobApplicationForm = () => {
                         <p className="mt-1 text-sm text-red-500">{errors.email}</p>
                       )}
                     </div>
+                    )}
 
                     {/* Phone */}
+                    {isBaseFieldVisible('phone') && (
                     <div className="group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                           </svg>
-                          {t('joinUs:phone') || 'Phone'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:phone') || 'Phone'} {isBaseFieldRequired('phone') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
                         name="phone"
                         type="tel"
+                        inputMode="numeric"
+                        pattern="01[0125]\d{8}"
+                        minLength={11}
+                        maxLength={11}
                         placeholder={t('joinUs:phone') || 'Phone'}
+                        onChange={(e) => {
+                          const digitsOnly = e.target.value.replace(/\D+/g, '').slice(0, 11);
+                          setFieldValue('phone', digitsOnly);
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const paste = (e.clipboardData || window.clipboardData).getData('text') || '';
+                          const digitsOnly = paste.replace(/\D+/g, '').slice(0, 11);
+                          setFieldValue('phone', digitsOnly);
+                        }}
                         className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
                       />
                       {errors.phone && touched.phone && (
                         <p className="mt-1 text-sm text-red-500">{errors.phone}</p>
                       )}
                     </div>
+                    )}
 
    {/* Expected Salary (visible only if backend enables salaryFieldVisible) */}
-                    {jobPosition?.salaryFieldVisible && (
+                    {isBaseFieldVisible('expectedSalary') && (
                       <div className="group">
                         <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                           <div className="flex items-center gap-2">
@@ -1084,7 +1652,7 @@ const JobApplicationForm = () => {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-3 0-5 2-5 5v3h10v-3c0-3-2-5-5-5z" />
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2v4" />
                             </svg>
-                            {t('joinUs:expectedSalary') || 'Expected Salary'}
+                            {t('joinUs:expectedSalary') || 'Expected Salary'} {isBaseFieldRequired('expectedSalary') && <span className="text-red-500 ml-1">*</span>}
                           </div>
                         </label>
                         <input
@@ -1113,6 +1681,7 @@ const JobApplicationForm = () => {
                     )}
 
                     {/* Address */}
+                    {isBaseFieldVisible('address') && (
                     <div className="md:col-span-2 group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
@@ -1120,7 +1689,7 @@ const JobApplicationForm = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                          {t('joinUs:address') || 'Address'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:address') || 'Address'} {isBaseFieldRequired('address') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
@@ -1134,15 +1703,17 @@ const JobApplicationForm = () => {
                         <p className="mt-1 text-sm text-red-500">{errors.address}</p>
                       )}
                     </div>
+                    )}
 
                     {/* Birth Date */}
+                    {isBaseFieldVisible('birthDate') && (
                     <div className="group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
-                          {t('joinUs:dateOfBirth') || 'Birth Date'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:dateOfBirth') || 'Birth Date'} {isBaseFieldRequired('birthDate') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
@@ -1155,15 +1726,17 @@ const JobApplicationForm = () => {
                         <p className="mt-1 text-sm text-red-500">{errors.birthDate}</p>
                       )}
                     </div>
+                    )}
 
                     {/* Gender */}
+                    {isBaseFieldVisible('gender') && (
                     <div className="group">
                       <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                         <div className="flex items-center gap-2">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zM6 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
                           </svg>
-                          {t('joinUs:gender') || 'Gender'} <span className="text-red-500 ml-1">*</span>
+                          {t('joinUs:gender') || 'Gender'} {isBaseFieldRequired('gender') && <span className="text-red-500 ml-1">*</span>}
                         </div>
                       </label>
                       <Field
@@ -1179,6 +1752,7 @@ const JobApplicationForm = () => {
                         <p className="mt-1 text-sm text-red-500">{errors.gender}</p>
                       )}
                     </div>
+                    )}
 
                     
 
@@ -1186,15 +1760,43 @@ const JobApplicationForm = () => {
                   </div>
 
                   {/* CV Upload - Circular */}
+                  {isBaseFieldVisible('cvFilePath') && (
                   <div className="flex justify-center mb-8">
                     <input
                       type="file"
                       id="cv-upload"
-                      accept=".pdf,.doc,.docx"
+                      accept=".pdf,application/pdf"
                       hidden
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          setFieldValue('cvFile', e.target.files[0]);
+                          const selectedFile = e.target.files[0];
+                          if (!isAllowedCvFile(selectedFile)) {
+                            setFieldValue('cvFile', null);
+                            e.target.value = '';
+                            Swal.fire({
+                              icon: 'warning',
+                              title: t('joinUs:validationError') || 'Validation Error',
+                              text: t('joinUs:invalidCVType') || 'Only PDF files are allowed',
+                              confirmButtonText: t('common:ok') || 'OK',
+                              confirmButtonColor: '#f59e0b',
+                            });
+                            return;
+                          }
+
+                          if (!isFileWithinSizeLimit(selectedFile, maxCvFileSizeInBytes)) {
+                            setFieldValue('cvFile', null);
+                            e.target.value = '';
+                            Swal.fire({
+                              icon: 'warning',
+                              title: t('joinUs:validationError') || 'Validation Error',
+                              text: t('joinUs:cvTooLarge') || 'CV file size must be 10 MB or less',
+                              confirmButtonText: t('common:ok') || 'OK',
+                              confirmButtonColor: '#f59e0b',
+                            });
+                            return;
+                          }
+
+                          setFieldValue('cvFile', selectedFile);
                         }
                       }}
                     />
@@ -1205,8 +1807,8 @@ const JobApplicationForm = () => {
                             <svg className="w-10 h-10 text-success-600" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                             </svg>
-                            <p className="text-xs text-success-700 font-semibold mt-1 text-center wrap-break w-full px-1" title={values.cvFile.name}>
-                              {values.cvFile.name.length > 15 ? values.cvFile.name.substring(0, 12) + '...' : values.cvFile.name}
+                            <p className="text-xs text-success-700 font-semibold mt-1 text-center wrap-break w-full px-1" title={cvFullFileName || (t('joinUs:uploadCV') || 'CV')}>
+                              {cvDisplayFileName || (t('joinUs:uploadCV') || 'CV')}
                             </p>
                           </div>
                         ) : (
@@ -1230,12 +1832,17 @@ const JobApplicationForm = () => {
                         ) : (
                           <>
                             {t('joinUs:uploadCV') || 'Upload CV'}{' '}
-                            <span className="text-xs text-light-500 dark:text-light-400">({t('joinUs:optional') || (isArabic ? 'اختياري' : 'Optional')})</span>
+                            {isBaseFieldRequired('cvFilePath') ? (
+                              <span className="text-red-500 ml-1">*</span>
+                            ) : (
+                              <span className="text-xs text-light-500 dark:text-light-400">({t('joinUs:optional') || (isArabic ? 'اختياري' : 'Optional')})</span>
+                            )}
                           </>
                         )}
                       </p>
                     </label>
                   </div>
+                  )}
 
                   {/* Dynamic Custom Fields */}
                   {jobPosition.customFields && jobPosition.customFields.length > 0 && (
@@ -1261,6 +1868,13 @@ const JobApplicationForm = () => {
                           const fieldName = `customResponses.${fieldKey}`;
 
                           if ((field.inputType === 'groupField' || field.inputType === 'repeatable_group') && field.groupFields) {
+                            const isSingleGroupField = field.inputType === 'groupField';
+                            const rawGroups = Array.isArray(repeatableGroups[fieldKey]) && repeatableGroups[fieldKey].length > 0
+                              ? repeatableGroups[fieldKey]
+                              : [{}];
+                            const groupsToRender = isSingleGroupField ? [rawGroups[0] || {}] : rawGroups;
+                            const groupFieldErrorText = getFirstErrorText(errors.customResponses?.[fieldKey]);
+
                             return (
                               <div key={fieldKey} className="w-full">
                                 <div className="p-6 rounded-2xl bg-primary-500/5 border-2 border-primary-500/20">
@@ -1270,11 +1884,14 @@ const JobApplicationForm = () => {
                                     {field.isRequired && <span className="text-red-500 ml-1">*</span>}
                                   </h4>
                                   
-                                  {repeatableGroups[fieldKey]?.map((group, groupIndex) => (
+                                  {groupsToRender.map((group, groupIndex) => (
                                     <div key={groupIndex} className="mb-4 p-4 bg-white dark:bg-dark-800 rounded-xl border border-light-200 dark:border-dark-600">
                                       <div className="grid grid-cols-1 gap-4 mb-3">
                                         {field.groupFields.map((subField) => {
                                           const subFieldKey = getFieldKey(subField);
+                                          const subFieldName = isSingleGroupField
+                                            ? `customResponses.${fieldKey}.${subFieldKey}`
+                                            : `customResponses.${fieldKey}.${groupIndex}.${subFieldKey}`;
                                           return (
                                           <div key={subFieldKey}>
                                             <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
@@ -1282,9 +1899,28 @@ const JobApplicationForm = () => {
                                               {subField.isRequired && <span className="text-red-500 ml-1">*</span>}
                                             </label>
                                             <input
+                                              name={subFieldName}
                                               type={subField.inputType || 'text'}
                                               value={group[subFieldKey] || ''}
-                                              onChange={(e) => handleRepeatableGroupChange(fieldKey, groupIndex, subFieldKey, e.target.value)}
+                                              onChange={(e) => {
+                                                const updatedGroups = [...groupsToRender];
+                                                if (!updatedGroups[groupIndex]) updatedGroups[groupIndex] = {};
+
+                                                updatedGroups[groupIndex] = {
+                                                  ...updatedGroups[groupIndex],
+                                                  [subFieldKey]: e.target.value,
+                                                };
+
+                                                setRepeatableGroups((prev) => ({
+                                                  ...prev,
+                                                  [fieldKey]: updatedGroups,
+                                                }));
+
+                                                setFieldValue(
+                                                  fieldName,
+                                                  isSingleGroupField ? (updatedGroups[0] || {}) : updatedGroups
+                                                );
+                                              }}
                                               required={subField.isRequired}
                                               className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
                                             />
@@ -1292,10 +1928,17 @@ const JobApplicationForm = () => {
                                           );
                                         })}
                                       </div>
-                                      {repeatableGroups[fieldKey].length > 1 && (
+                                      {!isSingleGroupField && groupsToRender.length > 1 && (
                                         <button
                                           type="button"
-                                          onClick={() => removeRepeatableGroup(fieldKey, groupIndex)}
+                                          onClick={() => {
+                                            const updatedGroups = groupsToRender.filter((_, i) => i !== groupIndex);
+                                            setRepeatableGroups((prev) => ({
+                                              ...prev,
+                                              [fieldKey]: updatedGroups,
+                                            }));
+                                            setFieldValue(fieldName, updatedGroups);
+                                          }}
                                           className="text-red-500 hover:text-red-600 text-sm font-semibold flex items-center gap-1"
                                         >
                                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1307,16 +1950,29 @@ const JobApplicationForm = () => {
                                     </div>
                                   ))}
                                   
-                                  <button
-                                    type="button"
-                                    onClick={() => addRepeatableGroup(fieldKey)}
-                                    className="mt-3 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-medium text-sm flex items-center gap-2 transition-colors"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                    </svg>
-                                    {t('joinUs:addMore') || 'Add More'}
-                                  </button>
+                                  {!isSingleGroupField && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updatedGroups = [...groupsToRender, {}];
+                                        setRepeatableGroups((prev) => ({
+                                          ...prev,
+                                          [fieldKey]: updatedGroups,
+                                        }));
+                                        setFieldValue(fieldName, updatedGroups);
+                                      }}
+                                      className="mt-3 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-medium text-sm flex items-center gap-2 transition-colors"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                      </svg>
+                                      {t('joinUs:addMore') || 'Add More'}
+                                    </button>
+                                  )}
+
+                                  {groupFieldErrorText && (touched.customResponses?.[fieldKey] || submitCount > 0) && (
+                                    <p className="mt-2 text-sm text-red-500">{groupFieldErrorText}</p>
+                                  )}
                                 </div>
                               </div>
                             );
