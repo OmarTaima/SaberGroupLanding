@@ -459,6 +459,186 @@ const JobApplicationForm = () => {
     return '';
   };
 
+  const getFirstErrorPath = (errorNode, prefix = '') => {
+    if (!errorNode) return '';
+
+    if (typeof errorNode === 'string') {
+      return prefix;
+    }
+
+    if (Array.isArray(errorNode)) {
+      for (let index = 0; index < errorNode.length; index += 1) {
+        const childPrefix = prefix ? `${prefix}.${index}` : String(index);
+        const path = getFirstErrorPath(errorNode[index], childPrefix);
+        if (path) return path;
+      }
+      return '';
+    }
+
+    if (typeof errorNode === 'object') {
+      for (const key of Object.keys(errorNode)) {
+        const childPrefix = prefix ? `${prefix}.${key}` : key;
+        const path = getFirstErrorPath(errorNode[key], childPrefix);
+        if (path) return path;
+      }
+    }
+
+    return '';
+  };
+
+  const toReadableLabel = (raw) => {
+    if (!raw || typeof raw !== 'string') return '';
+    return raw
+      .replace(/_/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const escapeHtml = (value = '') => {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  };
+
+  const getFixHintByInputType = (inputType, fallbackLabel) => {
+    switch (inputType) {
+      case 'email':
+        return t('joinUs:fixHintEmail') || 'Enter a valid email address, for example name@example.com.';
+      case 'number':
+        return t('joinUs:fixHintNumber') || 'Enter numbers only (no letters or symbols).';
+      case 'url':
+        return t('joinUs:fixHintUrl') || 'Enter a full URL starting with http:// or https://.';
+      case 'date':
+        return t('joinUs:fixHintDate') || 'Choose a valid date that is not in the future.';
+      case 'dropdown':
+      case 'radio':
+        return t('joinUs:fixHintSelection') || 'Select one of the available options.';
+      case 'checkbox':
+        return t('joinUs:fixHintCheckbox') || 'Tick the checkbox to continue.';
+      case 'tags':
+        return t('joinUs:fixHintTags') || 'Add at least one tag and press Enter or Add.';
+      case 'groupField':
+      case 'repeatable_group':
+        return t('joinUs:fixHintGroup') || 'Complete all required fields in this section.';
+      default:
+        return (
+          t('joinUs:fixHintDefault') ||
+          `Review ${fallbackLabel || 'this field'} and provide a valid value.`
+        );
+    }
+  };
+
+  const getFieldValidationDetails = (errorPath) => {
+    const baseFields = {
+      fullName: {
+        label: t('joinUs:fullName') || 'Full Name',
+        hint: t('joinUs:fixHintFullName') || 'Enter your full name using letters and spaces only.',
+      },
+      email: {
+        label: t('joinUs:email') || 'Email',
+        hint: t('joinUs:fixHintEmail') || 'Enter a valid email address, for example name@example.com.',
+      },
+      phone: {
+        label: t('joinUs:phone') || 'Phone',
+        hint:
+          t('joinUs:fixHintPhone') ||
+          'Enter an 11-digit Egyptian number starting with 010, 011, 012, or 015.',
+      },
+      address: {
+        label: t('joinUs:address') || 'Address',
+        hint: t('joinUs:fixHintAddress') || 'Enter a complete address with enough details.',
+      },
+      birthDate: {
+        label: t('joinUs:dateOfBirth') || 'Birth Date',
+        hint: t('joinUs:fixHintDate') || 'Choose a valid date that is not in the future.',
+      },
+      gender: {
+        label: t('joinUs:gender') || 'Gender',
+        hint: t('joinUs:fixHintSelection') || 'Select one of the available options.',
+      },
+      expectedSalary: {
+        label: t('joinUs:expectedSalary') || 'Expected Salary',
+        hint: t('joinUs:fixHintSalary') || 'Enter numbers only and keep the value within the allowed range.',
+      },
+      profilePhotoFile: {
+        label: t('joinUs:photo') || 'Profile Photo',
+        hint: t('joinUs:fixHintPhoto') || 'Upload a JPG or PNG photo up to 5 MB.',
+      },
+      cvFile: {
+        label: t('joinUs:uploadCV') || 'CV',
+        hint: t('joinUs:fixHintCv') || 'Upload a PDF file up to 10 MB.',
+      },
+      agreedToTerms: {
+        label: t('joinUs:termsAndConditions') || 'Terms and Conditions',
+        hint: t('joinUs:fixHintTerms') || 'Accept all required terms and conditions to continue.',
+      },
+    };
+
+    if (!errorPath || typeof errorPath !== 'string') {
+      return {
+        label: t('joinUs:applicationForm') || 'Application Form',
+        hint: t('joinUs:fixHintDefault') || 'Review highlighted fields and provide valid values.',
+      };
+    }
+
+    if (Object.prototype.hasOwnProperty.call(baseFields, errorPath)) {
+      return baseFields[errorPath];
+    }
+
+    if (errorPath.startsWith('jobSpecsResponses.')) {
+      return {
+        label: t('joinUs:jobSpecs') || 'Job Specifications',
+        hint: t('joinUs:fixHintJobSpecs') || 'Review the job specifications and update your response.',
+      };
+    }
+
+    if (errorPath.startsWith('customResponses.')) {
+      const pathParts = errorPath.split('.');
+      const customFieldKey = pathParts[1] || '';
+      const customFieldDefinition = (jobPosition?.customFields || []).find(
+        (field) => getFieldKey(field) === customFieldKey
+      );
+
+      const customFieldLabel =
+        getLocalizedText(customFieldDefinition?.label) || toReadableLabel(customFieldKey) || 'Custom Field';
+
+      const isRepeatable = customFieldDefinition?.inputType === 'repeatable_group';
+      const firstNestedPart = pathParts[2];
+      const hasRowIndex = /^\d+$/.test(firstNestedPart || '');
+      const nestedSubKey = hasRowIndex ? pathParts[3] : firstNestedPart;
+
+      if ((customFieldDefinition?.inputType === 'groupField' || isRepeatable) && nestedSubKey) {
+        const subFieldDefinition = (customFieldDefinition.groupFields || []).find(
+          (subField) => getFieldKey(subField) === nestedSubKey
+        );
+        const subFieldLabel =
+          getLocalizedText(subFieldDefinition?.label) || toReadableLabel(nestedSubKey) || 'Field';
+
+        const rowSuffix = hasRowIndex
+          ? ` (${t('joinUs:entry') || 'Entry'} ${Number(firstNestedPart) + 1})`
+          : '';
+
+        return {
+          label: `${customFieldLabel} - ${subFieldLabel}${rowSuffix}`,
+          hint: getFixHintByInputType(subFieldDefinition?.inputType, subFieldLabel),
+        };
+      }
+
+      return {
+        label: customFieldLabel,
+        hint: getFixHintByInputType(customFieldDefinition?.inputType, customFieldLabel),
+      };
+    }
+
+    return {
+      label: toReadableLabel(errorPath) || (t('joinUs:applicationForm') || 'Application Form'),
+      hint: t('joinUs:fixHintDefault') || 'Review highlighted fields and provide valid values.',
+    };
+  };
+
   const getAllowedChoiceValues = (choices = []) => {
     return choices
       .map((choice) => getLocalizedText(choice))
@@ -1409,11 +1589,13 @@ const JobApplicationForm = () => {
                   scrollToFirstError(formErrors);
 
                   // derive first error message (handle nested customResponses)
-                  const firstErrorKey = Object.keys(formErrors)[0];
                   const firstErrorMessage =
-                    getFirstErrorText(formErrors[firstErrorKey]) ||
+                    getFirstErrorText(formErrors) ||
                     t('joinUs:validationError') ||
                     'Please review the highlighted fields';
+                  const firstErrorPath = getFirstErrorPath(formErrors);
+                  const { label: firstErrorFieldLabel, hint: firstErrorFixHint } =
+                    getFieldValidationDetails(firstErrorPath);
 
                   // mark touched for all error fields so validation messages appear
                   const allTouched = {};
@@ -1428,10 +1610,18 @@ const JobApplicationForm = () => {
                   setTouched(allTouched, false);
 
                   setTimeout(() => {
+                    const fixFieldTitlePrefix =
+                      t('joinUs:fixFieldTitle') ||
+                      (isArabic ? 'يرجى تصحيح هذا الحقل' : 'Please fix this field');
+
                     Swal.fire({
                       icon: 'warning',
-                      title: t('joinUs:validationError') || 'Validation Error',
-                      text: firstErrorMessage,
+                      title: `${fixFieldTitlePrefix}: ${firstErrorFieldLabel}`,
+                      html: `<div style="text-align:${isArabic ? 'right' : 'left'};line-height:1.6;">${
+                        `<p style="margin:0 0 8px;"><strong>${escapeHtml(isArabic ? 'الحقل' : 'Field')}:</strong> ${escapeHtml(firstErrorFieldLabel)}</p>` +
+                        `<p style="margin:0 0 8px;"><strong>${escapeHtml(isArabic ? 'المشكلة' : 'Issue')}:</strong> ${escapeHtml(firstErrorMessage)}</p>` +
+                        `<p style="margin:0;"><strong>${escapeHtml(isArabic ? 'الإجراء المطلوب' : 'What to do')}:</strong> ${escapeHtml(firstErrorFixHint)}</p>`
+                      }</div>`,
                       confirmButtonText: t('common:ok') || 'OK',
                       confirmButtonColor: '#f59e0b',
                     });
@@ -1497,7 +1687,7 @@ const JobApplicationForm = () => {
                             e.target.value = '';
                             Swal.fire({
                               icon: 'warning',
-                              title: t('joinUs:validationError') || 'Validation Error',
+                              title: t('joinUs:photo') || 'Profile Photo',
                               text: t('joinUs:invalidPhotoType') || 'Only JPG, JPEG, and PNG files are allowed',
                               confirmButtonText: t('common:ok') || 'OK',
                               confirmButtonColor: '#f59e0b',
@@ -1775,7 +1965,7 @@ const JobApplicationForm = () => {
                             e.target.value = '';
                             Swal.fire({
                               icon: 'warning',
-                              title: t('joinUs:validationError') || 'Validation Error',
+                              title: t('joinUs:uploadCV') || 'CV',
                               text: t('joinUs:invalidCVType') || 'Only PDF files are allowed',
                               confirmButtonText: t('common:ok') || 'OK',
                               confirmButtonColor: '#f59e0b',
@@ -1788,7 +1978,7 @@ const JobApplicationForm = () => {
                             e.target.value = '';
                             Swal.fire({
                               icon: 'warning',
-                              title: t('joinUs:validationError') || 'Validation Error',
+                              title: t('joinUs:uploadCV') || 'CV',
                               text: t('joinUs:cvTooLarge') || 'CV file size must be 10 MB or less',
                               confirmButtonText: t('common:ok') || 'OK',
                               confirmButtonColor: '#f59e0b',
