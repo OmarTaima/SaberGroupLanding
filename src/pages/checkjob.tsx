@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import Swal from 'sweetalert2';
-import { checkExistingApplicant } from '../api/formsApi';
+import { checkExistingApplicant, getApiErrorMessage } from '../api/formsApi';
 import { useTranslation } from '../i18n/hooks/useTranslation';
 import { getJobPositions } from '../store/slices/jobPositionsSlice';
 import { getDefaultOgImage, getFullUrl, SITE_NAME } from '../utils/ogMeta';
@@ -291,11 +291,10 @@ const CheckPreviousApplication: React.FC = () => {
 			await Swal.fire({
 				icon: 'error',
 				title: t('joinUs:checkApplicationStatus') || 'Check Application Status',
-				text:
-					err?.response?.data?.message ||
-					err?.message ||
-					t('joinUs:statusCheckFailed') ||
-					'Unable to check application status right now.',
+				text: getApiErrorMessage(
+					err,
+					t('joinUs:statusCheckFailed') || 'Unable to check application status right now.'
+				),
 				confirmButtonColor: '#e42e2b',
 			});
 		} finally {

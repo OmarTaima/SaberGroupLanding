@@ -6,7 +6,7 @@ import { Formik, Form, Field } from 'formik';
 import { Checkbox, FormHelperText } from '@mui/material';
 import * as Yup from 'yup';
 import axios from 'axios';
-import { submitApplicant, checkExistingApplicant } from '../api/formsApi';
+import { submitApplicant, checkExistingApplicant, getApiErrorMessage } from '../api/formsApi';
 import Swal from 'sweetalert2';
 import { useTranslation } from '../i18n/hooks/useTranslation';
 import { getJobPositions } from '../store/slices/jobPositionsSlice';
@@ -34,6 +34,17 @@ const JobApplicationForm = () => {
   const maxExpectedSalaryValue = 100000;
 
   const jobPosition = positions.find((pos) => pos.slug === slug);
+  const orderedCustomFields = Array.isArray(jobPosition?.customFields)
+    ? [...jobPosition.customFields].sort((a, b) => {
+      const aOrder = Number.isFinite(Number(a?.displayOrder))
+        ? Number(a.displayOrder)
+        : Number.MAX_SAFE_INTEGER;
+      const bOrder = Number.isFinite(Number(b?.displayOrder))
+        ? Number(b.displayOrder)
+        : Number.MAX_SAFE_INTEGER;
+      return aOrder - bOrder;
+    })
+    : [];
 
   const baseFieldDefaults = {
     fullName: { visible: true, required: true },
@@ -82,10 +93,11 @@ const JobApplicationForm = () => {
       setAcceptedTerms(termsMap);
 
       const groups = {};
-      jobPosition.customFields
+      orderedCustomFields
         ?.filter((field) => field.inputType === 'groupField' || field.inputType === 'repeatable_group')
         .forEach((field) => {
-          const fieldKey = field.name || field.fieldId;
+          const fieldKey = getFieldKey(field) || field.name || field.fieldId;
+          if (!fieldKey) return;
           groups[fieldKey] = [{}];
         });
       setRepeatableGroups(groups);
@@ -94,11 +106,21 @@ const JobApplicationForm = () => {
 
   // Helper function to get the field key (convert label to readable key)
   const getFieldKey = (field) => {
-    const labelText = getLocalizedText(field.label);
-    if (!labelText) return field.fieldId; // Fallback to fieldId if no label
-    
-    // Convert label to snake_case readable key
-    return labelText
+    if (!field) return '';
+    if (typeof field === 'string') {
+      return String(field)
+        .toLowerCase()
+        .trim()
+        .replace(/[^\w\s\u0600-\u06FF]/g, '')
+        .replace(/\s+/g, '_');
+    }
+
+    const stableCandidate = field.fieldId || field.name || field.id || field._id;
+    const keySource = stableCandidate || getLocalizedText(field.label);
+    if (!keySource) return '';
+
+    // Use stable ids when available; fallback to a normalized label.
+    return String(keySource)
       .toLowerCase()
       .trim()
       .replace(/[^\w\s\u0600-\u06FF]/g, '') // Remove special chars but keep Arabic
@@ -108,12 +130,12 @@ const JobApplicationForm = () => {
   // Helper to always derive the English key (use `en` label when present)
   const getFieldKeyEn = (field) => {
     if (!field) return '';
-    if (typeof field === 'string') return field;
+    if (typeof field === 'string') return getFieldKey(field);
     // field may be the full field object; prefer its `label` object
     const labelObj = field.label || field;
     const enLabel = (typeof labelObj === 'object') ? (labelObj.en || labelObj.ar || field.name || field.fieldId || '') : '';
     const labelText = extractStringFromRich(enLabel);
-    if (!labelText) return field.fieldId || '';
+    if (!labelText) return getFieldKey(field);
     return labelText
       .toLowerCase()
       .trim()
@@ -340,8 +362,8 @@ const JobApplicationForm = () => {
     } catch (error) {
       console.debug('Upload failed:', error.response?.data || error.message);
       console.debug('Upload error details:', error);
-      const serverMessage = error.response?.data?.error?.message || error.message;
-      throw new Error(`File upload failed: ${serverMessage}`);
+      const serverMessage = getApiErrorMessage(error, error?.message || 'File upload failed');
+      throw new Error(serverMessage);
     }
   };
 
@@ -385,39 +407,6 @@ const JobApplicationForm = () => {
     return allowedCvMimeTypes.includes(normalizedType) || hasAllowedExtension(file.name, allowedCvExtensions);
   };
 
-  const getExactRequestErrorMessage = (error) => {
-    const fallback = t('joinUs:submissionError') || 'Failed to submit application';
-
-    if (!error) return fallback;
-
-    const responseData = error.response?.data;
-
-    if (typeof responseData === 'string' && responseData.trim()) {
-      return responseData;
-    }
-
-    if (typeof responseData?.message === 'string' && responseData.message.trim()) {
-      return responseData.message;
-    }
-
-    if (Array.isArray(responseData?.errors) && responseData.errors.length > 0) {
-      const firstError = responseData.errors[0];
-      if (typeof firstError === 'string' && firstError.trim()) return firstError;
-      if (typeof firstError?.message === 'string' && firstError.message.trim()) return firstError.message;
-      if (typeof firstError?.msg === 'string' && firstError.msg.trim()) return firstError.msg;
-    }
-
-    if (typeof responseData?.error?.message === 'string' && responseData.error.message.trim()) {
-      return responseData.error.message;
-    }
-
-    if (typeof error.message === 'string' && error.message.trim()) {
-      return error.message;
-    }
-
-    return fallback;
-  };
-
   const createTrimmedStringSchema = () =>
     Yup.string().transform((value, originalValue) => {
       if (typeof originalValue !== 'string') return value;
@@ -426,6 +415,7 @@ const JobApplicationForm = () => {
 
   const hasMeaningfulValue = (value) => {
     if (value === undefined || value === null) return false;
+    if (value instanceof Date) return !Number.isNaN(value.getTime());
     if (typeof value === 'string') return value.trim() !== '';
     if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'object') return Object.keys(value).length > 0;
@@ -435,6 +425,39 @@ const JobApplicationForm = () => {
   const hasAnyFilledValue = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     return Object.values(value).some((entry) => hasMeaningfulValue(entry));
+  };
+
+  const stringifyForDisplay = (value, maxChars = 20000) => {
+    try {
+      const serialized = JSON.stringify(value, null, 2);
+      if (serialized.length <= maxChars) return serialized;
+      return `${serialized.slice(0, maxChars)}\n... [truncated]`;
+    } catch (error) {
+      return String(value);
+    }
+  };
+
+  const mergeGroupRows = (primaryRows, secondaryRows) => {
+    const first = Array.isArray(primaryRows) ? primaryRows : [];
+    const second = Array.isArray(secondaryRows) ? secondaryRows : [];
+    const maxLength = Math.max(first.length, second.length);
+
+    if (maxLength === 0) return [];
+
+    return Array.from({ length: maxLength }, (_, index) => {
+      const secondRow = second[index];
+      const firstRow = first[index];
+
+      const normalizedSecond =
+        secondRow && typeof secondRow === 'object' && !Array.isArray(secondRow) ? secondRow : {};
+      const normalizedFirst =
+        firstRow && typeof firstRow === 'object' && !Array.isArray(firstRow) ? firstRow : {};
+
+      return {
+        ...normalizedSecond,
+        ...normalizedFirst,
+      };
+    });
   };
 
   const getFirstErrorText = (errorNode) => {
@@ -503,29 +526,65 @@ const JobApplicationForm = () => {
       .replaceAll("'", '&#39;');
   };
 
+  const getTranslatedOrFallback = (key, fallback) => {
+    const translated = t(key);
+    if (typeof translated !== 'string') return fallback;
+
+    const trimmed = translated.trim();
+    if (!trimmed) return fallback;
+
+    const keyWithoutNamespace = key.includes(':') ? key.split(':').pop() : key;
+    if (trimmed === key || trimmed === keyWithoutNamespace) return fallback;
+
+    return translated;
+  };
+
+  const isRequiredFlagEnabled = (value) => {
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      return normalized === 'true' || normalized === '1';
+    }
+
+    if (typeof value === 'number') {
+      return value === 1;
+    }
+
+    return value === true;
+  };
+
   const getFixHintByInputType = (inputType, fallbackLabel) => {
     switch (inputType) {
       case 'email':
-        return t('joinUs:fixHintEmail') || 'Enter a valid email address, for example name@example.com.';
+        return getTranslatedOrFallback(
+          'joinUs:fixHintEmail',
+          'Enter a valid email address, for example name@example.com.'
+        );
       case 'number':
-        return t('joinUs:fixHintNumber') || 'Enter numbers only (no letters or symbols).';
+        return getTranslatedOrFallback(
+          'joinUs:fixHintNumber',
+          'Enter numbers only (no letters or symbols).'
+        );
       case 'url':
-        return t('joinUs:fixHintUrl') || 'Enter a full URL starting with http:// or https://.';
+        return getTranslatedOrFallback(
+          'joinUs:fixHintUrl',
+          'Enter a full URL starting with http:// or https://.'
+        );
       case 'date':
-        return t('joinUs:fixHintDate') || 'Choose a valid date that is not in the future.';
+        return getTranslatedOrFallback('joinUs:fixHintDate', 'Choose a valid date that is not in the future.');
       case 'dropdown':
+      case 'select':
       case 'radio':
-        return t('joinUs:fixHintSelection') || 'Select one of the available options.';
+        return getTranslatedOrFallback('joinUs:fixHintSelection', 'Select one of the available options.');
       case 'checkbox':
-        return t('joinUs:fixHintCheckbox') || 'Tick the checkbox to continue.';
+        return getTranslatedOrFallback('joinUs:fixHintCheckbox', 'Tick the checkbox to continue.');
       case 'tags':
-        return t('joinUs:fixHintTags') || 'Add at least one tag and press Enter or Add.';
+        return getTranslatedOrFallback('joinUs:fixHintTags', 'Add at least one tag and press Enter or Add.');
       case 'groupField':
       case 'repeatable_group':
-        return t('joinUs:fixHintGroup') || 'Complete all required fields in this section.';
+        return getTranslatedOrFallback('joinUs:fixHintGroup', 'Complete all required fields in this section.');
       default:
-        return (
-          t('joinUs:fixHintDefault') ||
+        return getTranslatedOrFallback(
+          'joinUs:fixHintDefault',
           `Review ${fallbackLabel || 'this field'} and provide a valid value.`
         );
     }
@@ -535,52 +594,71 @@ const JobApplicationForm = () => {
     const baseFields = {
       fullName: {
         label: t('joinUs:fullName') || 'Full Name',
-        hint: t('joinUs:fixHintFullName') || 'Enter your full name using letters and spaces only.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintFullName',
+          'Enter your full name using letters and spaces only.'
+        ),
       },
       email: {
         label: t('joinUs:email') || 'Email',
-        hint: t('joinUs:fixHintEmail') || 'Enter a valid email address, for example name@example.com.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintEmail',
+          'Enter a valid email address, for example name@example.com.'
+        ),
       },
       phone: {
         label: t('joinUs:phone') || 'Phone',
-        hint:
-          t('joinUs:fixHintPhone') ||
-          'Enter an 11-digit Egyptian number starting with 010, 011, 012, or 015.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintPhone',
+          'Enter an 11-digit Egyptian number starting with 010, 011, 012, or 015.'
+        ),
       },
       address: {
         label: t('joinUs:address') || 'Address',
-        hint: t('joinUs:fixHintAddress') || 'Enter a complete address with enough details.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintAddress',
+          'Enter a complete address with enough details.'
+        ),
       },
       birthDate: {
         label: t('joinUs:dateOfBirth') || 'Birth Date',
-        hint: t('joinUs:fixHintDate') || 'Choose a valid date that is not in the future.',
+        hint: getTranslatedOrFallback('joinUs:fixHintDate', 'Choose a valid date that is not in the future.'),
       },
       gender: {
         label: t('joinUs:gender') || 'Gender',
-        hint: t('joinUs:fixHintSelection') || 'Select one of the available options.',
+        hint: getTranslatedOrFallback('joinUs:fixHintSelection', 'Select one of the available options.'),
       },
       expectedSalary: {
         label: t('joinUs:expectedSalary') || 'Expected Salary',
-        hint: t('joinUs:fixHintSalary') || 'Enter numbers only and keep the value within the allowed range.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintSalary',
+          'Enter numbers only and keep the value within the allowed range.'
+        ),
       },
       profilePhotoFile: {
         label: t('joinUs:photo') || 'Profile Photo',
-        hint: t('joinUs:fixHintPhoto') || 'Upload a JPG or PNG photo up to 5 MB.',
+        hint: getTranslatedOrFallback('joinUs:fixHintPhoto', 'Upload a JPG or PNG photo up to 5 MB.'),
       },
       cvFile: {
         label: t('joinUs:uploadCV') || 'CV',
-        hint: t('joinUs:fixHintCv') || 'Upload a PDF file up to 10 MB.',
+        hint: getTranslatedOrFallback('joinUs:fixHintCv', 'Upload a PDF file up to 10 MB.'),
       },
       agreedToTerms: {
         label: t('joinUs:termsAndConditions') || 'Terms and Conditions',
-        hint: t('joinUs:fixHintTerms') || 'Accept all required terms and conditions to continue.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintTerms',
+          'Accept all required terms and conditions to continue.'
+        ),
       },
     };
 
     if (!errorPath || typeof errorPath !== 'string') {
       return {
         label: t('joinUs:applicationForm') || 'Application Form',
-        hint: t('joinUs:fixHintDefault') || 'Review highlighted fields and provide valid values.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintDefault',
+          'Review highlighted fields and provide valid values.'
+        ),
       };
     }
 
@@ -591,14 +669,17 @@ const JobApplicationForm = () => {
     if (errorPath.startsWith('jobSpecsResponses.')) {
       return {
         label: t('joinUs:jobSpecs') || 'Job Specifications',
-        hint: t('joinUs:fixHintJobSpecs') || 'Review the job specifications and update your response.',
+        hint: getTranslatedOrFallback(
+          'joinUs:fixHintJobSpecs',
+          'Review the job specifications and update your response.'
+        ),
       };
     }
 
     if (errorPath.startsWith('customResponses.')) {
       const pathParts = errorPath.split('.');
       const customFieldKey = pathParts[1] || '';
-      const customFieldDefinition = (jobPosition?.customFields || []).find(
+      const customFieldDefinition = orderedCustomFields.find(
         (field) => getFieldKey(field) === customFieldKey
       );
 
@@ -618,7 +699,7 @@ const JobApplicationForm = () => {
           getLocalizedText(subFieldDefinition?.label) || toReadableLabel(nestedSubKey) || 'Field';
 
         const rowSuffix = hasRowIndex
-          ? ` (${t('joinUs:entry') || 'Entry'} ${Number(firstNestedPart) + 1})`
+          ? ` (${getTranslatedOrFallback('joinUs:entry', 'Entry')} ${Number(firstNestedPart) + 1})`
           : '';
 
         return {
@@ -635,7 +716,10 @@ const JobApplicationForm = () => {
 
     return {
       label: toReadableLabel(errorPath) || (t('joinUs:applicationForm') || 'Application Form'),
-      hint: t('joinUs:fixHintDefault') || 'Review highlighted fields and provide valid values.',
+      hint: getTranslatedOrFallback(
+        'joinUs:fixHintDefault',
+        'Review highlighted fields and provide valid values.'
+      ),
     };
   };
 
@@ -694,6 +778,7 @@ const JobApplicationForm = () => {
       }
 
       case 'dropdown':
+      case 'select':
       case 'radio': {
         const allowedChoices = getAllowedChoiceValues(fieldDefinition?.choices || []);
         let schema = createTrimmedStringSchema().test(
@@ -928,16 +1013,17 @@ const JobApplicationForm = () => {
     // including groupField and repeatable_group types.
     const customShape = {};
 
-    jobPosition?.customFields?.forEach((field) => {
+    orderedCustomFields.forEach((field) => {
       const fieldKey = getFieldKey(field);
       const fieldLabel = getLocalizedText(field.label) || fieldKey;
+      const fieldIsRequired = isRequiredFlagEnabled(field.isRequired);
 
       // Helper for a generic required message
       const requiredMsg = `${fieldLabel} ${t('joinUs:isRequired') || 'is required'}`;
 
       switch (field.inputType) {
         case 'tags': {
-          if (field.isRequired) {
+          if (fieldIsRequired) {
             customShape[fieldKey] = Yup.array().min(1, requiredMsg).required(requiredMsg);
           } else {
             customShape[fieldKey] = Yup.array();
@@ -948,12 +1034,18 @@ const JobApplicationForm = () => {
         case 'groupField': {
           // Single object with subfields
           const groupShape = {};
-          const requiredSubKeys = [];
+          const requiredSubKeySets = [];
 
           (field.groupFields || []).forEach((sub) => {
             const subKey = getFieldKey(sub);
             const subLabel = getLocalizedText(sub.label) || subKey;
-            if (sub.isRequired) requiredSubKeys.push(subKey);
+            const subFieldId = typeof sub?.fieldId === 'string' ? sub.fieldId.trim() : '';
+            const keyCandidates = Array.from(new Set([subKey, subFieldId].filter(Boolean)));
+
+            if (isRequiredFlagEnabled(sub.isRequired)) {
+              requiredSubKeySets.push(keyCandidates);
+            }
+
             // Requiredness for subfields is enforced conditionally in the object-level test.
             groupShape[subKey] = createCustomFieldSchema(sub, subLabel, false);
           });
@@ -961,20 +1053,28 @@ const JobApplicationForm = () => {
           const objSchema = Yup.object()
             .shape(groupShape)
             .test('group-required', requiredMsg, (val) => {
-              const externalGroupValue = Array.isArray(repeatableGroups[fieldKey])
+              const externalGroupValueRaw = Array.isArray(repeatableGroups[fieldKey])
                 ? repeatableGroups[fieldKey][0]
                 : undefined;
-              const candidate = hasAnyFilledValue(val) ? val : externalGroupValue;
+              const formikGroup =
+                val && typeof val === 'object' && !Array.isArray(val) ? val : {};
+              const externalGroup =
+                externalGroupValueRaw && typeof externalGroupValueRaw === 'object' && !Array.isArray(externalGroupValueRaw)
+                  ? externalGroupValueRaw
+                  : {};
+              const candidate = { ...externalGroup, ...formikGroup };
 
-              const shouldEnforceRequiredSubfields = Boolean(field.isRequired || hasAnyFilledValue(candidate));
+              const shouldEnforceRequiredSubfields = Boolean(fieldIsRequired || hasAnyFilledValue(candidate));
               if (!shouldEnforceRequiredSubfields) return true;
 
               if (!candidate || !hasAnyFilledValue(candidate)) return false;
 
               // If the group has no required subfields, any non-empty group value is acceptable.
-              if (requiredSubKeys.length === 0) return true;
+              if (requiredSubKeySets.length === 0) return true;
 
-              return requiredSubKeys.every((k) => hasMeaningfulValue(candidate[k]));
+              return requiredSubKeySets.every((keySet) =>
+                keySet.some((key) => hasMeaningfulValue(candidate?.[key]))
+              );
             });
 
           customShape[fieldKey] = objSchema;
@@ -984,12 +1084,18 @@ const JobApplicationForm = () => {
         case 'repeatable_group': {
           // Array of objects; enforce min length if required and per-item required subfields
           const itemShape = {};
-          const requiredSubKeys = [];
+          const requiredSubKeySets = [];
 
           (field.groupFields || []).forEach((sub) => {
             const subKey = getFieldKey(sub);
             const subLabel = getLocalizedText(sub.label) || subKey;
-            if (sub.isRequired) requiredSubKeys.push(subKey);
+            const subFieldId = typeof sub?.fieldId === 'string' ? sub.fieldId.trim() : '';
+            const keyCandidates = Array.from(new Set([subKey, subFieldId].filter(Boolean)));
+
+            if (isRequiredFlagEnabled(sub.isRequired)) {
+              requiredSubKeySets.push(keyCandidates);
+            }
+
             // Requiredness for subfields is enforced per filled row.
             itemShape[subKey] = createCustomFieldSchema(sub, subLabel, false);
           });
@@ -998,30 +1104,53 @@ const JobApplicationForm = () => {
           // ensure at least one item has all required subfields filled.
           const perItemSchema = Yup.object()
             .shape(itemShape)
-            .test('repeatable-item-required-subfields', requiredMsg, (item) => {
-              if (!hasAnyFilledValue(item)) return true;
-              if (requiredSubKeys.length === 0) return true;
-              return requiredSubKeys.every((k) => hasMeaningfulValue(item?.[k]));
+            .test('repeatable-item-required-subfields', requiredMsg, function validateRepeatableItem(item) {
+              const currentPath = typeof this?.path === 'string' ? this.path : '';
+              const rowIndexMatch = currentPath.match(/\[(\d+)\]$/);
+              const rowIndex = rowIndexMatch ? Number(rowIndexMatch[1]) : -1;
+              const externalRows = Array.isArray(repeatableGroups[fieldKey]) ? repeatableGroups[fieldKey] : [];
+              const externalItemRaw = rowIndex >= 0 ? externalRows[rowIndex] : undefined;
+
+              const normalizedItem =
+                item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+              const normalizedExternalItem =
+                externalItemRaw && typeof externalItemRaw === 'object' && !Array.isArray(externalItemRaw)
+                  ? externalItemRaw
+                  : {};
+              const mergedItem = {
+                ...normalizedExternalItem,
+                ...normalizedItem,
+              };
+
+              if (!hasAnyFilledValue(mergedItem)) return true;
+              if (requiredSubKeySets.length === 0) return true;
+
+              return requiredSubKeySets.every((keySet) =>
+                keySet.some((key) => hasMeaningfulValue(mergedItem?.[key]))
+              );
             });
 
           let arrSchema = Yup.array().of(perItemSchema);
 
-          if (field.isRequired) {
+          if (fieldIsRequired) {
             arrSchema = arrSchema.test('repeatable-required', requiredMsg, (arr) => {
               // Also check the local repeatableGroups state (where the inputs write their values)
               const external = repeatableGroups[fieldKey];
+              const merged = mergeGroupRows(arr, external);
 
               const checkArray = (a) => {
                 if (!a || !Array.isArray(a) || a.length === 0) return false;
 
                 return a.some((item) => {
                   if (!hasAnyFilledValue(item)) return false;
-                  if (requiredSubKeys.length === 0) return true;
+                  if (requiredSubKeySets.length === 0) return true;
 
-                  return requiredSubKeys.every((k) => {
-                    const v = item && Object.prototype.hasOwnProperty.call(item, k) ? item[k] : undefined;
-                    return hasMeaningfulValue(v);
-                  });
+                  return requiredSubKeySets.every((keySet) =>
+                    keySet.some((key) => {
+                      const v = item && Object.prototype.hasOwnProperty.call(item, key) ? item[key] : undefined;
+                      return hasMeaningfulValue(v);
+                    })
+                  );
                 });
               };
 
@@ -1030,6 +1159,9 @@ const JobApplicationForm = () => {
 
               // Otherwise, check the external repeatableGroups state
               if (checkArray(external)) return true;
+
+              // Final fallback: check merged rows from both sources.
+              if (checkArray(merged)) return true;
 
               return false;
             });
@@ -1040,7 +1172,7 @@ const JobApplicationForm = () => {
         }
 
         case 'checkbox': {
-          if (field.isRequired) {
+          if (fieldIsRequired) {
             customShape[fieldKey] = Yup.boolean().oneOf([true], requiredMsg).required(requiredMsg);
           } else {
             customShape[fieldKey] = Yup.boolean();
@@ -1050,7 +1182,7 @@ const JobApplicationForm = () => {
 
         default: {
           // text, textarea, dropdown, radio, date, number, url, etc.
-          customShape[fieldKey] = createCustomFieldSchema(field, fieldLabel, Boolean(field.isRequired));
+          customShape[fieldKey] = createCustomFieldSchema(field, fieldLabel, fieldIsRequired);
           break;
         }
       }
@@ -1114,29 +1246,36 @@ const JobApplicationForm = () => {
       }
 
       const finalCustomResponses = { ...values.customResponses };
-      const customFieldByKey = new Map(
-        (jobPosition?.customFields || []).map((field) => [getFieldKey(field), field])
-      );
 
-      Object.keys(repeatableGroups).forEach((groupId) => {
-        const fieldDefinition = customFieldByKey.get(groupId);
-        const groups = Array.isArray(repeatableGroups[groupId]) ? repeatableGroups[groupId] : [];
-        const validGroups = groups.filter((group) => hasAnyFilledValue(group));
+      // Always process declared group fields so none are missed due state-key drift.
+      orderedCustomFields
+        .filter((field) => field.inputType === 'groupField' || field.inputType === 'repeatable_group')
+        .forEach((field) => {
+          const fieldKey = getFieldKey(field);
+          if (!fieldKey) return;
 
-        if (fieldDefinition?.inputType === 'groupField') {
-          finalCustomResponses[groupId] = validGroups[0] || {};
-          return;
-        }
+          const stateGroupsRaw = Array.isArray(repeatableGroups[fieldKey]) ? repeatableGroups[fieldKey] : [];
+          const formikValue = finalCustomResponses[fieldKey];
 
-        if (fieldDefinition?.inputType === 'repeatable_group') {
-          finalCustomResponses[groupId] = validGroups;
-          return;
-        }
+          if (field.inputType === 'groupField') {
+            const formikGroup =
+              formikValue && typeof formikValue === 'object' && !Array.isArray(formikValue)
+                ? formikValue
+                : null;
+            const stateGroup = stateGroupsRaw[0] || null;
+            const mergedGroup = formikGroup || stateGroup || {};
 
-        if (validGroups.length > 0) {
-          finalCustomResponses[groupId] = validGroups;
-        }
-      });
+            finalCustomResponses[fieldKey] = hasAnyFilledValue(mergedGroup) ? mergedGroup : {};
+            return;
+          }
+
+          const validFormikGroups = Array.isArray(formikValue)
+            ? formikValue.filter((group) => hasAnyFilledValue(group))
+            : [];
+          const validStateGroups = stateGroupsRaw.filter((group) => hasAnyFilledValue(group));
+
+          finalCustomResponses[fieldKey] = validFormikGroups.length > 0 ? validFormikGroups : validStateGroups;
+        });
 
       // Upload files to Cloudinary first
       let profilePhotoUrl = '';
@@ -1165,7 +1304,7 @@ const JobApplicationForm = () => {
       // Convert customResponses values to English labels (always send `en`)
       const englishCustomResponses = { ...finalCustomResponses };
 
-      jobPosition?.customFields?.forEach((field) => {
+      orderedCustomFields.forEach((field) => {
         const fieldKey = getFieldKey(field);
         if (!Object.prototype.hasOwnProperty.call(englishCustomResponses, fieldKey)) return;
 
@@ -1203,7 +1342,7 @@ const JobApplicationForm = () => {
 
       // Remap keys (and nested subkeys) to English-based keys
       const remappedCustomResponses = {};
-      jobPosition?.customFields?.forEach((field) => {
+      orderedCustomFields.forEach((field) => {
         const locKey = getFieldKey(field);
         const enKey = getFieldKeyEn(field) || locKey;
         if (!Object.prototype.hasOwnProperty.call(englishCustomResponses, locKey)) return;
@@ -1240,7 +1379,7 @@ const JobApplicationForm = () => {
       });
 
       // Include any leftover keys that weren't described in customFields as-is
-      const locKeySet = new Set((jobPosition?.customFields || []).map((f) => getFieldKey(f)));
+      const locKeySet = new Set(orderedCustomFields.map((f) => getFieldKey(f)));
       Object.keys(englishCustomResponses).forEach((k) => {
         // skip keys that were local keys handled above
         if (locKeySet.has(k)) return;
@@ -1333,12 +1472,29 @@ const JobApplicationForm = () => {
     } catch (error) {
       console.debug('Error submitting application:', error);
       console.debug('Error response:', error.response?.data);
-      const exactErrorMessage = getExactRequestErrorMessage(error);
+      const exactErrorMessage = getApiErrorMessage(
+        error,
+        t('joinUs:submissionError') || 'Failed to submit application'
+      );
+
+      const backendPayload = error?.response?.data;
+      const backendFullError =
+        typeof backendPayload === 'string' && backendPayload.trim()
+          ? backendPayload
+          : backendPayload !== undefined
+            ? stringifyForDisplay(backendPayload)
+            : exactErrorMessage;
+
+      const useHtmlErrorBody = backendPayload !== undefined && typeof backendPayload !== 'string';
+
       Swal.close();
       await Swal.fire({
         icon: 'error',
         title: t('joinUs:error') || 'Error',
-        text: exactErrorMessage,
+        text: useHtmlErrorBody ? undefined : backendFullError,
+        html: useHtmlErrorBody
+          ? `<pre style="max-height:260px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;text-align:${isArabic ? 'right' : 'left'};white-space:pre-wrap;word-break:break-word;">${escapeHtml(backendFullError)}</pre>`
+          : undefined,
         confirmButtonText: t('common:ok') || 'OK',
         confirmButtonColor: '#ef4444',
       });
@@ -1407,7 +1563,7 @@ const JobApplicationForm = () => {
     profilePhotoFile: null,
     cvFile: null,
     agreedToTerms: false,
-    customResponses: jobPosition?.customFields?.reduce((acc, field) => {
+    customResponses: orderedCustomFields.reduce((acc, field) => {
       const fieldKey = getFieldKey(field);
       if (field.inputType === 'tags') {
         acc[fieldKey] = [];
@@ -1594,8 +1750,7 @@ const JobApplicationForm = () => {
                     t('joinUs:validationError') ||
                     'Please review the highlighted fields';
                   const firstErrorPath = getFirstErrorPath(formErrors);
-                  const { label: firstErrorFieldLabel, hint: firstErrorFixHint } =
-                    getFieldValidationDetails(firstErrorPath);
+                  const { label: firstErrorFieldLabel } = getFieldValidationDetails(firstErrorPath);
 
                   // mark touched for all error fields so validation messages appear
                   const allTouched = {};
@@ -1610,18 +1765,15 @@ const JobApplicationForm = () => {
                   setTouched(allTouched, false);
 
                   setTimeout(() => {
-                    const fixFieldTitlePrefix =
-                      t('joinUs:fixFieldTitle') ||
-                      (isArabic ? 'يرجى تصحيح هذا الحقل' : 'Please fix this field');
+                    const fixFieldTitlePrefix = getTranslatedOrFallback(
+                      'joinUs:fixFieldTitle',
+                      isArabic ? 'يرجى تصحيح هذا الحقل' : 'Please fix this field'
+                    );
 
                     Swal.fire({
                       icon: 'warning',
                       title: `${fixFieldTitlePrefix}: ${firstErrorFieldLabel}`,
-                      html: `<div style="text-align:${isArabic ? 'right' : 'left'};line-height:1.6;">${
-                        `<p style="margin:0 0 8px;"><strong>${escapeHtml(isArabic ? 'الحقل' : 'Field')}:</strong> ${escapeHtml(firstErrorFieldLabel)}</p>` +
-                        `<p style="margin:0 0 8px;"><strong>${escapeHtml(isArabic ? 'المشكلة' : 'Issue')}:</strong> ${escapeHtml(firstErrorMessage)}</p>` +
-                        `<p style="margin:0;"><strong>${escapeHtml(isArabic ? 'الإجراء المطلوب' : 'What to do')}:</strong> ${escapeHtml(firstErrorFixHint)}</p>`
-                      }</div>`,
+                      text: firstErrorMessage,
                       confirmButtonText: t('common:ok') || 'OK',
                       confirmButtonColor: '#f59e0b',
                     });
@@ -2035,7 +2187,7 @@ const JobApplicationForm = () => {
                   )}
 
                   {/* Dynamic Custom Fields */}
-                  {jobPosition.customFields && jobPosition.customFields.length > 0 && (
+                  {orderedCustomFields.length > 0 && (
                     <>
                       <div className="md:col-span-2 mb-6">
                         <div className="relative">
@@ -2053,15 +2205,21 @@ const JobApplicationForm = () => {
                       </div>
 
                       <div className="flex flex-col gap-6 mb-8">
-                        {jobPosition.customFields.map((field) => {
+                        {orderedCustomFields.map((field) => {
                           const fieldKey = getFieldKey(field);
                           const fieldName = `customResponses.${fieldKey}`;
 
                           if ((field.inputType === 'groupField' || field.inputType === 'repeatable_group') && field.groupFields) {
                             const isSingleGroupField = field.inputType === 'groupField';
-                            const rawGroups = Array.isArray(repeatableGroups[fieldKey]) && repeatableGroups[fieldKey].length > 0
+                            const stateGroups = Array.isArray(repeatableGroups[fieldKey])
                               ? repeatableGroups[fieldKey]
-                              : [{}];
+                              : [];
+                            const formikGroups = Array.isArray(values.customResponses?.[fieldKey])
+                              ? values.customResponses[fieldKey]
+                              : [];
+                            const rawGroups = formikGroups.length > 0
+                              ? formikGroups
+                              : (stateGroups.length > 0 ? stateGroups : [{}]);
                             const groupsToRender = isSingleGroupField ? [rawGroups[0] || {}] : rawGroups;
                             const groupFieldErrorText = getFirstErrorText(errors.customResponses?.[fieldKey]);
 
@@ -2071,7 +2229,7 @@ const JobApplicationForm = () => {
                                   <h4 className="text-lg font-bold text-light-900 dark:text-white mb-4 flex items-center gap-2">
                                     <div className="w-1 h-6 bg-primary-500 rounded-full"></div>
                                     {getLocalizedText(field.label)}
-                                    {field.isRequired && <span className="text-red-500 ml-1">*</span>}
+                                    {isRequiredFlagEnabled(field.isRequired) && <span className="text-red-500 ml-1">*</span>}
                                   </h4>
                                   
                                   {groupsToRender.map((group, groupIndex) => (
@@ -2082,38 +2240,89 @@ const JobApplicationForm = () => {
                                           const subFieldName = isSingleGroupField
                                             ? `customResponses.${fieldKey}.${subFieldKey}`
                                             : `customResponses.${fieldKey}.${groupIndex}.${subFieldKey}`;
+                                          const rawSubFieldValue = group?.[subFieldKey];
+                                          const stringSubFieldValue =
+                                            rawSubFieldValue === undefined || rawSubFieldValue === null
+                                              ? ''
+                                              : String(rawSubFieldValue);
+                                          const updateGroupSubFieldValue = (nextValue) => {
+                                            // Update Formik at the exact nested path to avoid stale array snapshots.
+                                            setFieldValue(subFieldName, nextValue);
+
+                                            // Keep local group state in sync for UI/payload fallback logic.
+                                            setRepeatableGroups((prev) => {
+                                              const existingRows = Array.isArray(prev[fieldKey])
+                                                ? [...prev[fieldKey]]
+                                                : [];
+
+                                              if (!existingRows[groupIndex]) existingRows[groupIndex] = {};
+
+                                              existingRows[groupIndex] = {
+                                                ...existingRows[groupIndex],
+                                                [subFieldKey]: nextValue,
+                                              };
+
+                                              return {
+                                                ...prev,
+                                                [fieldKey]: existingRows,
+                                              };
+                                            });
+                                          };
+
                                           return (
                                           <div key={subFieldKey}>
                                             <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">
                                               {getLocalizedText(subField.label)}
-                                              {subField.isRequired && <span className="text-red-500 ml-1">*</span>}
+                                              {isRequiredFlagEnabled(subField.isRequired) && <span className="text-red-500 ml-1">*</span>}
                                             </label>
-                                            <input
-                                              name={subFieldName}
-                                              type={subField.inputType || 'text'}
-                                              value={group[subFieldKey] || ''}
-                                              onChange={(e) => {
-                                                const updatedGroups = [...groupsToRender];
-                                                if (!updatedGroups[groupIndex]) updatedGroups[groupIndex] = {};
-
-                                                updatedGroups[groupIndex] = {
-                                                  ...updatedGroups[groupIndex],
-                                                  [subFieldKey]: e.target.value,
-                                                };
-
-                                                setRepeatableGroups((prev) => ({
-                                                  ...prev,
-                                                  [fieldKey]: updatedGroups,
-                                                }));
-
-                                                setFieldValue(
-                                                  fieldName,
-                                                  isSingleGroupField ? (updatedGroups[0] || {}) : updatedGroups
-                                                );
-                                              }}
-                                              required={subField.isRequired}
-                                              className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
-                                            />
+                                            {subField.inputType === 'textarea' ? (
+                                              <textarea
+                                                name={subFieldName}
+                                                rows={3}
+                                                value={stringSubFieldValue}
+                                                onChange={(e) => updateGroupSubFieldValue(e.target.value)}
+                                                required={isRequiredFlagEnabled(subField.isRequired)}
+                                                className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200 resize-y"
+                                              />
+                                            ) : (subField.inputType === 'dropdown' || subField.inputType === 'select' || subField.inputType === 'radio') && Array.isArray(subField.choices) && subField.choices.length > 0 ? (
+                                              <select
+                                                name={subFieldName}
+                                                value={stringSubFieldValue}
+                                                onChange={(e) => updateGroupSubFieldValue(e.target.value)}
+                                                required={isRequiredFlagEnabled(subField.isRequired)}
+                                                className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200 cursor-pointer"
+                                              >
+                                                <option value="">{t('joinUs:selectOption') || 'Please Select'}</option>
+                                                {subField.choices.map((choice, choiceIndex) => (
+                                                  <option key={choice._id || choiceIndex} value={getLocalizedText(choice)}>
+                                                    {getLocalizedText(choice)}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            ) : subField.inputType === 'checkbox' ? (
+                                              <label className="inline-flex items-center gap-3">
+                                                <input
+                                                  name={subFieldName}
+                                                  type="checkbox"
+                                                  checked={Boolean(rawSubFieldValue)}
+                                                  onChange={(e) => updateGroupSubFieldValue(e.target.checked)}
+                                                  required={isRequiredFlagEnabled(subField.isRequired)}
+                                                  className="h-5 w-5 rounded border-light-300 text-primary-500 focus:ring-primary-500"
+                                                />
+                                                <span className="text-sm text-light-700 dark:text-light-300">
+                                                  {getLocalizedText(subField.label)}
+                                                </span>
+                                              </label>
+                                            ) : (
+                                              <input
+                                                name={subFieldName}
+                                                type={['date', 'email', 'number', 'url', 'tel'].includes(subField.inputType) ? subField.inputType : 'text'}
+                                                value={stringSubFieldValue}
+                                                onChange={(e) => updateGroupSubFieldValue(e.target.value)}
+                                                required={isRequiredFlagEnabled(subField.isRequired)}
+                                                className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
+                                              />
+                                            )}
                                           </div>
                                           );
                                         })}
@@ -2171,10 +2380,10 @@ const JobApplicationForm = () => {
                           return (
                             <div key={fieldKey}>
                               <label className="block text-sm font-semibold text-light-900 dark:text-white mb-2">{getLocalizedText(field.label)}
-                                {field.isRequired && <span className="text-red-500 ml-1">*</span>}
+                                {isRequiredFlagEnabled(field.isRequired) && <span className="text-red-500 ml-1">*</span>}
                               </label>
 
-                              {['text', 'email', 'number', 'date', 'url'].includes(field.inputType) && (
+                              {['text', 'email', 'number', 'date', 'url', 'tel', 'time', 'datetime-local', 'month', 'password'].includes(field.inputType) && (
                                 <>
                                   <Field
                                     name={fieldName}
@@ -2203,7 +2412,7 @@ const JobApplicationForm = () => {
                                 </>
                               )}
 
-                              {field.inputType === 'dropdown' && field.choices && (
+                              {(field.inputType === 'dropdown' || field.inputType === 'select') && (
                                 <>
                                   <Field
                                     as="select"
@@ -2214,7 +2423,7 @@ const JobApplicationForm = () => {
                                     <option value="" disabled>
                                       Please Select
                                     </option>
-                                    {field.choices.map((choice, idx) => (
+                                    {(Array.isArray(field.choices) ? field.choices : []).map((choice, idx) => (
                                       <option key={idx} value={getLocalizedText(choice)}>
                                         {getLocalizedText(choice)}
                                       </option>
@@ -2226,7 +2435,7 @@ const JobApplicationForm = () => {
                                 </>
                               )}
 
-                              {field.inputType === 'radio' && field.choices && (
+                              {field.inputType === 'radio' && Array.isArray(field.choices) && field.choices.length > 0 && (
                                 <div className="space-y-2">
                                   {field.choices.map((choice, idx) => (
                                     <label key={idx} className="flex items-center gap-3 cursor-pointer group">
@@ -2343,6 +2552,37 @@ const JobApplicationForm = () => {
                                     <p className="mt-1 text-sm text-red-500">{errors.customResponses[fieldKey]}</p>
                                   )}
                                 </div>
+                              )}
+
+                              {![
+                                'text',
+                                'email',
+                                'number',
+                                'date',
+                                'url',
+                                'tel',
+                                'time',
+                                'datetime-local',
+                                'month',
+                                'password',
+                                'textarea',
+                                'dropdown',
+                                'select',
+                                'radio',
+                                'checkbox',
+                                'tags',
+                              ].includes(field.inputType) && (
+                                <>
+                                  <Field
+                                    name={fieldName}
+                                    type="text"
+                                    placeholder={getLocalizedText(field.label) || field.fieldId || 'Field value'}
+                                    className="w-full px-4 py-3 rounded-xl bg-white dark:bg-dark-800 border-2 border-light-200 dark:border-dark-600 text-light-900 dark:text-white placeholder-light-400 dark:placeholder-dark-400 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/20 transition-all duration-200"
+                                  />
+                                  {errors.customResponses?.[fieldKey] && touched.customResponses?.[fieldKey] && (
+                                    <p className="mt-1 text-sm text-red-500">{errors.customResponses[fieldKey]}</p>
+                                  )}
+                                </>
                               )}
                             </div>
                           );
