@@ -552,6 +552,18 @@ const JobApplicationForm = () => {
     return value === true;
   };
 
+  const isRequiredValidationMessage = (message) => {
+    if (typeof message !== 'string') return false;
+    const normalized = message.toLowerCase();
+    return normalized.includes('required') || normalized.includes('مطلوب');
+  };
+
+  const getCustomFieldKeyFromPath = (path = '') => {
+    if (typeof path !== 'string' || !path.startsWith('customResponses.')) return '';
+    const pathParts = path.split('.');
+    return pathParts[1] || '';
+  };
+
   const getFixHintByInputType = (inputType, fallbackLabel) => {
     switch (inputType) {
       case 'email':
@@ -1064,7 +1076,10 @@ const JobApplicationForm = () => {
                   : {};
               const candidate = { ...externalGroup, ...formikGroup };
 
-              const shouldEnforceRequiredSubfields = Boolean(fieldIsRequired || hasAnyFilledValue(candidate));
+              const hasRequiredSubfields = requiredSubKeySets.length > 0;
+              const shouldEnforceRequiredSubfields = Boolean(
+                fieldIsRequired || hasRequiredSubfields || hasAnyFilledValue(candidate)
+              );
               if (!shouldEnforceRequiredSubfields) return true;
 
               if (!candidate || !hasAnyFilledValue(candidate)) return false;
@@ -1132,7 +1147,9 @@ const JobApplicationForm = () => {
 
           let arrSchema = Yup.array().of(perItemSchema);
 
-          if (fieldIsRequired) {
+          const hasRequiredSubfields = requiredSubKeySets.length > 0;
+
+          if (fieldIsRequired || hasRequiredSubfields) {
             arrSchema = arrSchema.test('repeatable-required', requiredMsg, (arr) => {
               // Also check the local repeatableGroups state (where the inputs write their values)
               const external = repeatableGroups[fieldKey];
@@ -1196,6 +1213,35 @@ const JobApplicationForm = () => {
   };
 
   const handleFormSubmit = async (values, { setSubmitting }) => {
+    try {
+      await createValidationSchema().validate(values, { abortEarly: false });
+    } catch (validationError) {
+      const firstIssue =
+        Array.isArray(validationError?.inner) && validationError.inner.length > 0
+          ? validationError.inner.find((issue) => Boolean(issue?.message)) || validationError.inner[0]
+          : validationError;
+
+      const firstErrorPath = firstIssue?.path || '';
+      const firstErrorMessage =
+        firstIssue?.message || t('joinUs:validationError') || 'Please review the highlighted fields';
+      const { label: firstErrorFieldLabel } = getFieldValidationDetails(firstErrorPath);
+      const fixFieldTitlePrefix = getTranslatedOrFallback(
+        'joinUs:fixFieldTitle',
+        isArabic ? 'يرجى تصحيح هذا الحقل' : 'Please fix this field'
+      );
+
+      await Swal.fire({
+        icon: 'warning',
+        title: `${fixFieldTitlePrefix}: ${firstErrorFieldLabel}`,
+        text: firstErrorMessage,
+        confirmButtonText: t('common:ok') || 'OK',
+        confirmButtonColor: '#f59e0b',
+      });
+
+      setSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -1752,6 +1798,90 @@ const JobApplicationForm = () => {
                   const firstErrorPath = getFirstErrorPath(formErrors);
                   const { label: firstErrorFieldLabel } = getFieldValidationDetails(firstErrorPath);
 
+                  const customFieldKey = getCustomFieldKeyFromPath(firstErrorPath);
+                  const customFieldDefinition = orderedCustomFields.find(
+                    (field) => getFieldKey(field) === customFieldKey
+                  );
+                  const isGroupTypeField =
+                    customFieldDefinition?.inputType === 'groupField' ||
+                    customFieldDefinition?.inputType === 'repeatable_group';
+
+                  if (isGroupTypeField && customFieldKey) {
+                    const firstSubField = customFieldDefinition?.groupFields?.[0];
+                    const firstSubKey = getFieldKey(firstSubField);
+
+                    if (customFieldDefinition.inputType === 'repeatable_group') {
+                      const existingFormikRows = Array.isArray(values.customResponses?.[customFieldKey])
+                        ? values.customResponses[customFieldKey]
+                        : [];
+                      const existingUiRows = Array.isArray(repeatableGroups[customFieldKey])
+                        ? repeatableGroups[customFieldKey]
+                        : [];
+                      const rowsToUse = existingFormikRows.length > 0
+                        ? existingFormikRows
+                        : (existingUiRows.length > 0 ? existingUiRows : [{}]);
+
+                      if (existingFormikRows.length === 0) {
+                        setFieldValue(`customResponses.${customFieldKey}`, rowsToUse);
+                      }
+
+                      if (existingUiRows.length === 0) {
+                        setRepeatableGroups((prev) => ({
+                          ...prev,
+                          [customFieldKey]: rowsToUse,
+                        }));
+                      }
+
+                      if (firstSubKey) {
+                        setTimeout(() => {
+                          const firstQuestion = document.querySelector(
+                            `[name="customResponses.${customFieldKey}.0.${firstSubKey}"]`
+                          );
+                          firstQuestion?.focus?.();
+                        }, 80);
+                      }
+                    } else {
+                      const existingFormikGroup = values.customResponses?.[customFieldKey];
+                      const normalizedFormikGroup =
+                        existingFormikGroup && typeof existingFormikGroup === 'object' && !Array.isArray(existingFormikGroup)
+                          ? existingFormikGroup
+                          : {};
+
+                      setFieldValue(`customResponses.${customFieldKey}`, normalizedFormikGroup);
+                      setRepeatableGroups((prev) => {
+                        const existingRows = Array.isArray(prev[customFieldKey]) ? prev[customFieldKey] : [];
+                        return {
+                          ...prev,
+                          [customFieldKey]: [existingRows[0] || normalizedFormikGroup || {}],
+                        };
+                      });
+
+                      if (firstSubKey) {
+                        setTimeout(() => {
+                          const firstQuestion = document.querySelector(
+                            `[name="customResponses.${customFieldKey}.${firstSubKey}"]`
+                          );
+                          firstQuestion?.focus?.();
+                        }, 80);
+                      }
+                    }
+                  }
+
+                  let swalIssueText = firstErrorMessage;
+                  if (isRequiredValidationMessage(firstErrorMessage)) {
+                    if (isGroupTypeField) {
+                      swalIssueText = getTranslatedOrFallback(
+                        'joinUs:atLeastOneGroupEntryRequired',
+                        `Please add at least one entry in ${firstErrorFieldLabel} and complete the required questions.`
+                      );
+                    } else {
+                      swalIssueText = getTranslatedOrFallback(
+                        'joinUs:requiredFieldEmptyAlert',
+                        `You cannot leave ${firstErrorFieldLabel} empty.`
+                      );
+                    }
+                  }
+
                   // mark touched for all error fields so validation messages appear
                   const allTouched = {};
                   const markTouched = (obj, prefix = '') => {
@@ -1773,7 +1903,7 @@ const JobApplicationForm = () => {
                     Swal.fire({
                       icon: 'warning',
                       title: `${fixFieldTitlePrefix}: ${firstErrorFieldLabel}`,
-                      text: firstErrorMessage,
+                      text: swalIssueText,
                       confirmButtonText: t('common:ok') || 'OK',
                       confirmButtonColor: '#f59e0b',
                     });
@@ -1785,7 +1915,7 @@ const JobApplicationForm = () => {
               };
 
               return (
-                <Form className="glass rounded-2xl p-8" onSubmit={handleSubmitWithScroll}>
+                <Form className="glass rounded-2xl p-8" onSubmit={handleSubmitWithScroll} noValidate>
                   <h2 className="text-2xl font-bold text-light-900 dark:text-white mb-6">
                     {t('joinUs:applicationForm') || 'Application Form'}
                   </h2>

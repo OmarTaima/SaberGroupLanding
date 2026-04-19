@@ -47,6 +47,8 @@
   "invalidPhone": "رقم هاتف غير صحيح",
   "invalidSelection": "يرجى اختيار قيمة صحيحة",
   "selectOption": "يرجى الاختيار",
+  "requiredFieldEmptyAlert": "لا يمكنك ترك هذا الحقل المطلوب فارغًا.",
+  "atLeastOneGroupEntryRequired": "يرجى إضافة مدخل واحد على الأقل في هذا القسم وإكمال الأسئلة المطلوبة.",
   "photoRequired": "الصورة مطلوبة",
   "invalidPhotoType": "يُسمح فقط بملفات JPG وJPEG وPNG",
   "invalidCVType": "يُسمح فقط بملفات PDF",

@@ -47,6 +47,8 @@
   "invalidPhone": "Invalid phone number",
   "invalidSelection": "Please select a valid option",
   "selectOption": "Please Select",
+  "requiredFieldEmptyAlert": "You cannot leave this required field empty.",
+  "atLeastOneGroupEntryRequired": "Please add at least one entry in this section and complete the required questions.",
   "photoRequired": "Photo is required",
   "invalidPhotoType": "Only JPG, JPEG, and PNG files are allowed",
   "invalidCVType": "Only PDF files are allowed",
