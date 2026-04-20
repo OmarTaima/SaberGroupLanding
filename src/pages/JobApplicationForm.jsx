@@ -1821,7 +1821,7 @@ const JobApplicationForm = () => {
         confirmButtonColor: '#10b981',
       });
 
-      // navigate('/join-us');
+      navigate('/join-us');
     } catch (error) {
       console.debug('Error submitting application:', error);
       console.debug('Error response:', error.response?.data);
