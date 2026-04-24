@@ -395,7 +395,7 @@ const JobApplicationForm = () => {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const response = await axios.post(uploadUrl, formData, {
-          timeout: 60000, // 60 second timeout
+          timeout: 180000, // 60 second timeout
           onUploadProgress: (progressEvent) => {
             const titleEl = document.querySelector('.swal2-title');
             if (!titleEl) return;
@@ -1798,6 +1798,7 @@ const JobApplicationForm = () => {
         address: withVisibility('address', values.address),
         birthDate: withVisibility('birthDate', values.birthDate),
         gender: withVisibility('gender', values.gender),
+        status: "pending",
         expectedSalary: withVisibility('expectedSalary', values.expectedSalary),
         profilePhoto: withVisibility('profilePhoto', profilePhotoUrl),
         cvFilePath: withVisibility('cvFilePath', cvUrl),
