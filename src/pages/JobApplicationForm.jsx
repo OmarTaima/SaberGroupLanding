@@ -1669,6 +1669,7 @@ const JobApplicationForm = () => {
       });
 
       // Remap keys (and nested subkeys) to English-based keys
+      // Wrap each sent answer with its input `type` alongside the actual `answer` value.
       const remappedCustomResponses = {};
       orderedCustomFields.forEach((field) => {
         const locKey = getFieldKey(field);
@@ -1679,6 +1680,8 @@ const JobApplicationForm = () => {
           return;
 
         const val = englishCustomResponses[locKey];
+
+        const wrap = (inputType, value) => ({ type: inputType || 'text', answer: value });
 
         if (
           field.inputType === 'groupField' &&
@@ -1691,7 +1694,7 @@ const JobApplicationForm = () => {
             const subLoc = getFieldKey(sub);
             const subEn = getFieldKeyEn(sub) || subLoc;
             if (Object.prototype.hasOwnProperty.call(val, subLoc))
-              mapped[subEn] = val[subLoc];
+              mapped[subEn] = wrap(sub.inputType, val[subLoc]);
           });
           remappedCustomResponses[enKey] = mapped;
           return;
@@ -1699,21 +1702,21 @@ const JobApplicationForm = () => {
 
         if (field.inputType === 'repeatable_group' && Array.isArray(val)) {
           remappedCustomResponses[enKey] = val.map((item) => {
-            if (!item || typeof item !== 'object') return item;
+            if (!item || typeof item !== 'object') return wrap(field.inputType, item);
             const mappedItem = {};
             (field.groupFields || []).forEach((sub) => {
               const subLoc = getFieldKey(sub);
               const subEn = getFieldKeyEn(sub) || subLoc;
               if (Object.prototype.hasOwnProperty.call(item, subLoc))
-                mappedItem[subEn] = item[subLoc];
+                mappedItem[subEn] = wrap(sub.inputType, item[subLoc]);
             });
             return mappedItem;
           });
           return;
         }
 
-        // Default: primitive or array of primitives
-        remappedCustomResponses[enKey] = val;
+        // Default: primitive or array of primitives — wrap with the field inputType
+        remappedCustomResponses[enKey] = wrap(field.inputType, val);
       });
 
       // Include any leftover keys that weren't described in customFields as-is
@@ -1806,6 +1809,7 @@ const JobApplicationForm = () => {
           ? remappedCustomResponses
           : englishCustomResponses,
         jobSpecsResponses: jobSpecsResponsesArray,
+        isDuplicated: hasPreviousApplication,
       };
 
       const response = await submitApplicant(payload);
